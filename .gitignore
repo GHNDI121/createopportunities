@@ -1,0 +1,15 @@
+# ⛔ Exclure les fichiers de cache Python
+__pycache__/
+*.py[cod]
+
+# ❌ Exclure les fichiers d'environnement
+env/
+venv/
+
+# 📄 Exclure les fichiers temporaires du système
+.DS_Store
+Thumbs.db
+
+# 🧪 Exclure les fichiers logs et configs persos
+*.log
+*.env

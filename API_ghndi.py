@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pipeline import OpportunityPipeline
 import os
-import shutil
+import requests
 
 app = FastAPI()
 
@@ -19,62 +19,65 @@ app.add_middleware(
 # Initialisation du pipeline
 pipeline = OpportunityPipeline()
 
-# Route pour importer une image ou un fichier audio
-@app.post("/process-and-send/")
-async def process_and_send(file: UploadFile = File(...), file_type: str = Form(...)):
+# Fonction pour vérifier la configuration du jeton d'accès
+@app.post("/verify-token/")
+async def verify_token():
     """
-    Traite un fichier (image ou audio), détecte les opportunités, les analyse et les envoie à Salesforce.
+    Vérifie si le jeton d'accès Salesforce est configuré correctement.
     """
     try:
-        # Vérification du type de fichier
-        if file_type not in ["image", "audio"]:
-            return JSONResponse(content={"error": "Type de fichier non supporté. Utilisez 'image' ou 'audio'."}, status_code=400)
+        access_token = os.getenv("accessToken")
+        if not access_token:
+            return JSONResponse(content={"error": "Le jeton d'accès Salesforce n'est pas configuré."}, status_code=400)
+        return {"message": "Le jeton d'accès Salesforce est configuré correctement."}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la vérification du jeton : {str(e)}"}, status_code=500)
 
-        # Sauvegarder temporairement le fichier
-        temp_file_path = f"temp_{file.filename}"
-        with open(temp_file_path, "wb") as temp_file:
-            shutil.copyfileobj(file.file, temp_file)
+# Fonction pour vérifier la connexion à Salesforce
+@app.get("/check-connection/")
+async def check_connection():
+    """
+    Vérifie la connexion à Salesforce en utilisant le jeton d'accès.
+    """
+    try:
+        access_token = os.getenv("accessToken")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
 
-        # Appel des méthodes appropriées
-        if file_type == "image":
-            texte = pipeline.handle_image_file(temp_file_path)
-        elif file_type == "audio":
-            texte = pipeline.handle_audio_file(temp_file_path)
+        if not access_token or not salesforce_base_url:
+            return JSONResponse(content={"error": "Les informations d'authentification Salesforce sont manquantes."}, status_code=400)
 
-        # Supprimer le fichier temporaire
-        os.remove(temp_file_path)
+        # URL pour vérifier la connexion
+        url = f"{salesforce_base_url}/services/data/v63.0/"
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
 
-        # Vérification des opportunités détectées
-        if pipeline.opportunities_set:
-            opportunities = []
-            for opportunity_text in pipeline.opportunities_set:
-                # Envoyer chaque opportunité à Salesforce
-                response = pipeline.send_opportunity_to_salesforce(opportunity_text)
-                if response:
-                    opportunities.append(response)
+        response = requests.get(url, headers=headers)
 
-            return {"message": "Opportunités traitées et envoyées à Salesforce.", "opportunities": opportunities}
+        if response.status_code == 200:
+            return {"message": "Connexion à Salesforce réussie."}
         else:
-            return {"message": "Aucune opportunité détectée."}
+            return JSONResponse(content={"error": f"Erreur de connexion à Salesforce : {response.status_code}, {response.text}"}, status_code=response.status_code)
     except Exception as e:
-        return JSONResponse(content={"error": f"Erreur lors du traitement : {str(e)}"}, status_code=500)
+        return JSONResponse(content={"error": f"Erreur lors de la vérification de la connexion : {str(e)}"}, status_code=500)
 
-# endpoint pour soumettre du texte
-@app.post("/process-text/")
-async def process_text(text: str = Form(...)):
+# Endpoint pour envoyer les opportunités à Salesforce
+@app.post("/send-opportunities/")
+async def send_opportunities():
     """
-    Permet de soumettre un texte pour détecter des opportunités.
+    Envoie les opportunités détectées à Salesforce.
     """
     try:
-        pipeline.process_text(text)
-        return {"message": "Texte traité avec succès.", "opportunities": list(pipeline.opportunities_set)}
-    except Exception as e:
-        return JSONResponse(content={"error": f"Erreur lors du traitement : {str(e)}"}, status_code=500)
+        if not pipeline.opportunities_set:
+            return {"message": "Aucune opportunité à envoyer."}
 
-# endpoint pour récupérer toutes les opportunités détectées
-@app.get("/opportunities/")
-async def get_opportunities():
-    """
-    Récupère toutes les opportunités détectées.
-    """
-    return {"opportunities": list(pipeline.opportunities_set)}
+        opportunities = []
+        for opportunity_text in pipeline.opportunities_set:
+            # Envoyer chaque opportunité à Salesforce
+            response = pipeline.send_opportunity_to_salesforce(opportunity_text)
+            if response:
+                opportunities.append(response)
+
+        return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de l'envoi : {str(e)}"}, status_code=500)

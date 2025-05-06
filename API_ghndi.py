@@ -1,12 +1,21 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from pipeline import OpportunityPipeline
+from FONCTION import parse_opportunity_text
 import os
 import shutil
 import requests
+from dotenv import load_dotenv
+import base64
+import hashlib
+import secrets
 
 app = FastAPI()
+
+load_dotenv(dotenv_path="key.env")
 
 # Middleware pour gérer les CORS
 app.add_middleware(
@@ -20,36 +29,115 @@ app.add_middleware(
 # Initialisation du pipeline
 pipeline = OpportunityPipeline()
 
-# Endpoint pour vérifier la configuration du jeton d'accès
-@app.post("/verify-token/")
-async def verify_token():
+@app.get("/login")
+async def login():
     """
-    Vérifie si le jeton d'accès Salesforce est configuré correctement.
+    Endpoint pour initier le processus d'authentification OAuth avec Salesforce.
     """
     try:
-        access_token = os.getenv("accessToken")
-        if not access_token:
-            return JSONResponse(content={"error": "Le jeton d'accès Salesforce n'est pas configuré."}, status_code=400)
-        return {"message": "Le jeton d'accès Salesforce est configuré correctement."}
-    except Exception as e:
-        return JSONResponse(content={"error": f"Erreur lors de la vérification du jeton : {str(e)}"}, status_code=500)
+        client_id = os.getenv("Clé_consommateur_salesforce")
+        callback_url = os.getenv("SALESFORCE_CALLBACK_URL")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
 
-# Endpoint pour vérifier la connexion à Salesforce
+        if not client_id or not callback_url or not salesforce_base_url:
+            return JSONResponse(content={"error": "Les informations d'authentification OAuth sont incomplètes."}, status_code=400)
+
+        # Générer le code_verifier et le code_challenge
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+
+        # Stocker le code_verifier dans une variable d'environnement temporaire
+        os.environ["CODE_VERIFIER"] = code_verifier
+
+        # Construire l'URL d'autorisation avec le code_challenge
+        auth_url = (
+            f"{salesforce_base_url}/services/oauth2/authorize?"
+            f"response_type=code&client_id={client_id}&redirect_uri={callback_url}&"
+            f"code_challenge={code_challenge}&code_challenge_method=S256"
+        )
+
+        return {"auth_url": auth_url}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la génération de l'URL d'authentification : {str(e)}"}, status_code=500)
+
+
+@app.get("/callback")
+async def callback(code: str):
+    """
+    Endpoint pour gérer le callback OAuth après l'autorisation Salesforce.
+    """
+    try:
+        client_id = os.getenv("Clé_consommateur_salesforce")
+        client_secret = os.getenv("Secret_consommateur_salesforce")
+        callback_url = os.getenv("SALESFORCE_CALLBACK_URL")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
+        code_verifier = os.getenv("CODE_VERIFIER")
+
+        if not client_id or not client_secret or not callback_url or not salesforce_base_url or not code_verifier:
+            return JSONResponse(content={"error": "Les informations d'authentification OAuth sont incomplètes."}, status_code=400)
+
+        # URL pour échanger le code d'autorisation contre un jeton d'accès
+        token_url = f"{salesforce_base_url}/services/oauth2/token"
+
+        # Préparer les données pour la requête POST
+        data = {
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": callback_url,
+            "code": code,
+            "code_verifier": code_verifier
+        }
+
+        # Effectuer la requête POST
+        response = requests.post(token_url, data=data)
+
+        if response.status_code == 200:
+            token_data = response.json()
+            access_token = token_data.get("access_token")
+            instance_url = token_data.get("instance_url")
+
+            if not access_token or not instance_url:
+                return JSONResponse(content={"error": "Réponse invalide de Salesforce : jeton ou URL manquant."}, status_code=400)
+
+            # Mettre à jour le fichier key.env avec le nouveau jeton
+            with open("key.env", "r") as file:
+                lines = file.readlines()
+
+            with open("key.env", "w") as file:
+                for line in lines:
+                    if line.startswith("accessToken="):
+                        file.write(f"accessToken={access_token}\n")
+                    elif line.startswith("SALESFORCE_BASE_URL="):
+                        file.write(f"SALESFORCE_BASE_URL={instance_url}\n")
+                    else:
+                        file.write(line)
+
+            return {"message": "Authentification réussie.", "access_token": access_token, "instance_url": instance_url}
+        else:
+            return JSONResponse(content={"error": f"Erreur lors de l'échange du code d'autorisation : {response.status_code}, {response.text}"}, status_code=response.status_code)
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors du callback OAuth : {str(e)}"}, status_code=500)
+
+
 @app.get("/check-connection/")
 async def check_connection():
     """
-    Vérifie la connexion à Salesforce en utilisant le jeton d'accès.
+    Vérifie la connexion à Salesforce en utilisant directement le jeton d'accès et l'URL de l'instance.
     """
     try:
-        # Charger les informations depuis key.env
+        # Récupérer le jeton d'accès et l'URL de l'instance depuis key.env
         access_token = os.getenv("accessToken")
-        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
+        instance_url = os.getenv("SALESFORCE_BASE_URL")
+        api_version = os.getenv("apiversion")
 
-        if not access_token or not salesforce_base_url:
+        if not access_token or not instance_url or not api_version:
             return JSONResponse(content={"error": "Les informations d'authentification Salesforce sont manquantes."}, status_code=400)
 
         # URL pour vérifier la connexion
-        url = f"{salesforce_base_url}/services/data/v63.0/"
+        url = f"{instance_url}/services/data/v{api_version}/sobjects/"
         headers = {
             "Authorization": f"Bearer {access_token}"
         }
@@ -59,8 +147,6 @@ async def check_connection():
 
         if response.status_code == 200:
             return {"message": "Connexion à Salesforce réussie."}
-        elif response.status_code == 401:
-            return JSONResponse(content={"error": "Jeton d'accès invalide ou expiré. Veuillez générer un nouveau jeton."}, status_code=401)
         else:
             return JSONResponse(content={"error": f"Erreur de connexion à Salesforce : {response.status_code}, {response.text}"}, status_code=response.status_code)
     except Exception as e:
@@ -112,7 +198,7 @@ async def process_opportunity(file: UploadFile = File(None), text: str = Form(No
 @app.get("/send-opportunities/")
 async def send_opportunities():
     """
-    Envoie les opportunités détectées à Salesforce.
+    Envoie directement les opportunités détectées à Salesforce après les avoir formatées en JSON.
     """
     try:
         if not pipeline.opportunities_set:
@@ -120,11 +206,18 @@ async def send_opportunities():
 
         opportunities = []
         for opportunity_text in pipeline.opportunities_set:
-            # Envoyer chaque opportunité à Salesforce
-            response = pipeline.send_opportunity_to_salesforce(opportunity_text)
-            if response:
-                opportunities.append(response)
+            # Formater l'opportunité en JSON
+            opportunity_data = parse_opportunity_text(opportunity_text)
+            if opportunity_data:
+                # Envoyer chaque opportunité à Salesforce
+                response = pipeline.send_opportunity_to_salesforce(opportunity_text)
+                if response:
+                    opportunities.append(response)
 
-        return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}
+        if opportunities:
+            return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}
+        else:
+            return {"message": "Aucune opportunité n'a pu être envoyée."}
+
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de l'envoi : {str(e)}"}, status_code=500)

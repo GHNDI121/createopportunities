@@ -51,44 +51,41 @@ Le projet est structuré autour de plusieurs modules interconnectés pour automa
 ### 2. Composants principaux
 
 #### a) **FONCTION.py**
-- Contient les fonctions utilitaires pour extraire et traiter les données provenant de différentes sources (texte, image, audio).  
+- Contient les fonctions utilitaires pour extraire et traiter les données provenant de différentes sources (texte, image, audio).
 - **Principales fonctionnalités** :
-  - Extraction de texte depuis des images via OCR (`pytesseract`).  
-  - Transcription d'audio en texte via `speechrecognition`.  
-  - Conversion de fichiers audio en format WAV pour compatibilité.  
-  - Modèle de détection d'opportunités basé sur un LLM (Large Language Model) pour identifier les informations pertinentes et remplir les champs nécessaires.  
+  - Extraction de texte depuis des images via OCR (`pytesseract`).
+  - Transcription d'audio en texte via `speechrecognition`.
+  - Conversion de fichiers audio en format WAV pour compatibilité.
+  - Modèle de détection d'opportunités basé sur un LLM (Large Language Model) pour identifier les informations pertinentes et remplir les champs nécessaires.
+  - Analyse des opportunités détectées pour générer un dictionnaire JSON structuré.
   - Gestion des erreurs et validation des entrées pour garantir la robustesse des traitements.
 
 #### b) **pipeline.py**
-- Implémente le pipeline de traitement des données.  
+- Implémente le pipeline de traitement des données.
 - **Principales fonctionnalités** :
-  - Gestion des entrées (texte, image, audio).  
-  - Appel au modèle de détection d'opportunités pour extraire les informations pertinentes.  
-  - Élimination des doublons dans les opportunités détectées.  
-  - Stockage des opportunités dans un ensemble pour éviter les répétitions.  
+  - Gestion des entrées (texte, image, audio).
+  - Appel au modèle de détection d'opportunités pour extraire les informations pertinentes.
+  - Élimination des doublons dans les opportunités détectées.
+  - Stockage des opportunités dans un ensemble pour éviter les répétitions.
   - Normalisation des opportunités détectées pour garantir leur unicité.
+  - Envoi des opportunités détectées à Salesforce via l'API REST.
 
 #### c) **API_ghndi.py**
-- Fournit une interface RESTful pour interagir avec le pipeline.  
+- Fournit une interface RESTful pour interagir avec le pipeline.
 - **Principales fonctionnalités** :
-  - Endpoint pour traiter des fichiers (image/audio) et détecter des opportunités.  
-  - Endpoint pour soumettre du texte ou enregistrer un audio pour analyse.  
-  - Endpoint pour récupérer toutes les opportunités détectées.  
-  - Gestion des erreurs et validation des types de fichiers pour une meilleure expérience utilisateur.  
+  - Endpoint pour traiter des fichiers (image/audio) et détecter des opportunités.
+  - Endpoint pour soumettre du texte ou enregistrer un audio pour analyse.
+  - Endpoint pour récupérer toutes les opportunités détectées.
+  - Endpoint pour envoyer les opportunités détectées directement à Salesforce.
+  - Endpoint pour vérifier la connexion à Salesforce.
+  - Gestion des erreurs et validation des types de fichiers pour une meilleure expérience utilisateur.
   - Utilise `FastAPI` pour la création de l'API et `CORS` pour permettre des requêtes cross-origin.
 
-#### d) **salesforce_utils.py**
-- Fournit des fonctions pour interagir avec l'API Salesforce.  
-- **Principales fonctionnalités** :
-  - Authentification OAuth 2.0 pour obtenir un jeton d'accès Salesforce.  
-  - Création d'opportunités dans Salesforce via l'API REST.  
-  - Gestion des erreurs d'authentification et de création pour garantir la fiabilité des interactions avec Salesforce.
-
-#### e) **key.env**
-- Contient les variables d'environnement nécessaires pour le projet.  
+#### d) **key.env**
+- Contient les variables d'environnement nécessaires pour le projet.
 - **Principales informations** :
-  - Clé API pour le modèle LLM (`GROQ_API_KEY`).  
-  - Identifiants et URL pour l'authentification et l'accès à Salesforce.  
+  - Clé API pour le modèle LLM (`GROQ_API_KEY`).
+  - Identifiants et URL pour l'authentification et l'accès à Salesforce.
   - Gestion sécurisée des informations sensibles via des variables d'environnement.
 
 ### 3. Flux de données

@@ -7,7 +7,6 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path="key.env")
-
 class OpportunityPipeline:
     def __init__(self):
         self.opportunities_set = set()
@@ -51,42 +50,3 @@ class OpportunityPipeline:
             elif normalized:
                 print("Opportunité déjà détectée, ignorée.")
 
-    def send_opportunity_to_salesforce(self, opportunity_text):
-        """
-        Analyse une opportunité et l'envoie à Salesforce via l'API REST.
-        """
-        try:
-            # Analyser l'opportunité avec parse_opportunity_text
-            opportunity_data = parse_opportunity_text(opportunity_text)
-            if not opportunity_data:
-                print("Aucune donnée valide pour l'opportunité.")
-                return None
-
-            # Charger les informations d'authentification depuis key.env
-            access_token = os.getenv("accessToken")
-            salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
-
-            if not access_token or not salesforce_base_url:
-                raise ValueError("Les informations d'authentification Salesforce sont manquantes.")
-
-            # URL de l'API Salesforce pour créer une opportunité
-            url = f"{salesforce_base_url}/services/data/v63.0/sobjects/Opportunity"
-
-            # En-têtes de la requête
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json"
-            }
-
-            # Envoyer la requête POST
-            response = requests.post(url, json=opportunity_data, headers=headers)
-
-            if response.status_code == 201:
-                print("Opportunité envoyée avec succès à Salesforce.")
-                return response.json()
-            else:
-                print(f"Erreur lors de l'envoi à Salesforce : {response.status_code}, {response.text}")
-                return None
-        except Exception as e:
-            print(f"Erreur lors de l'envoi de l'opportunité à Salesforce : {e}")
-            return None

@@ -45,11 +45,11 @@ def detect_opportunities(texte):
                     "- Nom du compte : nom de l'organisation mentionnée dans le texte.\n"
                     "- Pays : prend la valeur «Sénégal» par défaut sauf indication contraire.\n"
                     "- Date de clôture :\n"
-                    "- Si une date est une **échéance**, utilise-la telle quelle.\n"
-                    "- Sinon, fixe la date **une semaine après aujourd’hui** et écris-la au format **jj/mm/aaaa**.\n"
-                    "- Si une date est mentionnée mais **pas au bon format**, convertis-la en **jj/mm/aaaa**.\n"
-                    "- Si seuls le **jour et le mois** sont donnés, ajoute **l’année actuelle**.\n"
-                    "- Si seuls le **mois et l’année** sont donnés, utilise **le dernier jour du mois** comme valeur de jour.\n"
+                    "    - Si une date est une **échéance**, **deadline** ou **date limite**; utilise-la \n"
+                    "    - Sinon s'il n'y a pas de date ou de date representant le date de cloture, fixe la date **une semaine après aujourd’hui** et écris-la au format **jj/mm/aaaa**.\n"
+                    "    - Si une date est mentionnée mais **pas au bon format**, convertis-la en **jj/mm/aaaa**.\n"
+                    "    - Si seuls le **jour et le mois** sont donnés, ajoute **l’année actuelle** (EX: on est en 2025 , Si on nous donne le 25/04 , nous allons mettre comme date de cloture 25/04/2025).\n"
+                    "    - Si seuls le **mois et l’année** sont donnés, utilise **le dernier jour du mois** comme valeur de jour (EX: Si on nous donne le 25/04 , nous allons mettre comme date de cloture 30/04/2025.\n"
                     "- Origine de la piste : prend la valeur «Demande client spontanée» par défaut.\n"
                     "- Type : choisir parmi les éléments suivants selon le contexte :\n"
                     "    - «vente directe»\n"
@@ -64,7 +64,7 @@ def detect_opportunities(texte):
                 "content": f"Voici un texte pour créer des opportunités :\n\n{texte}",
             },
         ],
-        temperature=0.7,  # Température ajustée à 0.7
+        temperature=0, 
         max_completion_tokens=512,
         top_p=1,
         stream=True,
@@ -222,12 +222,14 @@ def parse_opportunity_text(opportunity_text):
     Analyse le texte d'une opportunité et retourne un dictionnaire JSON avec les noms de champs Salesforce.
     """
     try:
+        from datetime import datetime
+
         # Mapping des champs locaux vers les champs Salesforce
         fields = {
             "StageName": r"Étape\s*:\s*(.+)",
             "Name": r"Nom de l'opportunité\s*:\s*(.+)",
             "AccountId": r"Nom du compte\s*:\s*(.+)",  
-            "Country__c": r"Pays\s*:\s*(.+)",
+            "Pays__c": r"Pays\s*:\s*(.+)",
             "CloseDate": r"Date de clôture\s*:\s*(.+)",
             "LeadSource": r"Origine de la piste\s*:\s*(.+)",
             "Type": r"Type\s*:\s*(.+)"
@@ -237,7 +239,16 @@ def parse_opportunity_text(opportunity_text):
         for key, pattern in fields.items():
             match = re.search(pattern, opportunity_text)
             if match:
-                parsed_data[key] = match.group(1).strip()
+                value = match.group(1).strip()
+
+                
+                if key == "CloseDate":
+                    try:
+                        value = datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
+                    except ValueError:
+                        raise ValueError(f"Format de date invalide pour CloseDate : {value}")
+
+                parsed_data[key] = value
 
         return parsed_data
     except Exception as e:

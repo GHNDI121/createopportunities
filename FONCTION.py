@@ -224,7 +224,7 @@ def parse_opportunity_text(opportunity_text):
         fields = {
             "StageName": r"Étape\s*:\s*(.+)",
             "Name": r"Nom de l'opportunité\s*:\s*(.+)",
-            "AccountName": r"Nom du compte\s*:\s*(.+)",
+            "AccountId": r"Nom du compte\s*:\s*(.+)",  # Remplacement de AccountName par AccountId
             "Country__c": r"Pays\s*:\s*(.+)",
             "CloseDate": r"Date de clôture\s*:\s*(.+)",
             "LeadSource": r"Origine de la piste\s*:\s*(.+)",

@@ -33,24 +33,28 @@ def detect_opportunities(texte):
                 "content": (
                     "Vous êtes commerciale, vous remplissez des champs pour la création d'opportunités commerciales dans un CRM.\n\n"
                     "Les opportunités peuvent être détectées dans des textes de différentes sources (mail, image, audio, etc.).\n\n"
+                    "⚠️ Vous devez respecter STRICTEMENT les règles suivantes :\n"
+                    "1. Une opportunité = un besoin commercial ou un groupe de besoins liés exprimés par un client.\n"
+                    "2. Ne créez qu'UNE opportunité par besoin ou ensemble de besoins liés à un même objectif.\n"
+                    "3. Ne créez PAS d’opportunités combinées (ex. un renouvellement + un projet).\n"
+                    "4. Ne dupliquez PAS les opportunités (pas de répétition pour le même besoin).\n"
+                    "5. Ignorez les actions internes ou les discussions qui ne comportent pas un besoin client explicite.\n\n"
                     "Pour chaque opportunité détectée, vous générez les champs suivants :\n"
                     "- Étape : prend la valeur «Prospection» à la création de l’opportunité.\n"
                     "- Nom de l'opportunité : basé sur le sujet ou le besoin exprimé dans le texte, en une phrase claire et concise.\n"
                     "- Nom du compte : nom de l'organisation mentionnée dans le texte.\n"
                     "- Pays : prend la valeur «Sénégal» par défaut sauf indication contraire.\n"
-                    "- Date de clôture : si une date est mentionnée, utilisez-la ; sinon, fixez-la à une semaine après aujourd’hui au format jj/mm/aaaa.\n"
+                    "- Date de clôture :\n"
+                    "    - si une date est mentionnée et reflète la limite du délai, c'est-à-dire une échéance, utilisez-la.\n"
+                    "    - sinon, fixez-la à une semaine après aujourd'hui (JOUR/MOIS/ANNEE : actuel) au format jj/mm/aaaa.\n"
+                    "    - si la date est mentionnée dans le texte, mais pas au format jj/mm/aaaa, utilisez le format jj/mm/aaaa.\n"
                     "- Origine de la piste : prend la valeur «Demande client spontanée» par défaut.\n"
                     "- Type : choisir parmi les éléments suivants selon le contexte :\n"
                     "    - «vente directe»\n"
                     "    - «renouvellement hors contrat»\n"
                     "    - «contrat de maintenance»\n"
                     "    - «projet»\n\n"
-                    "Règles importantes de détection :\n"
-                    "- Une opportunité = un besoin commercial exprimé. Même si plusieurs fonctionnalités ou étapes sont mentionnées, si elles sont liées à un même objectif global, elles doivent être **regroupées en une seule opportunité**.\n"
-                    "- Ne créez **plusieurs opportunités distinctes** que si le texte décrit des **besoins commerciaux clairement indépendants** (par exemple, deux projets différents pour des objectifs ou entités différentes).\n"
-                    "- Ignorez les actions internes ou les tâches planifiées si elles ne sont pas associées à un nouveau besoin exprimé par le client.\n"
-                    "- N'affichez que les opportunités détectées, sans aucune explication, justification ou texte supplémentaire.\n\n"
-                    "Vous retournez uniquement les opportunités au format texte avec un titre : «Nouvelle opportunité détectée :» suivi des champs listés."
+                    "Vous retournez uniquement les opportunités au format texte sans commentaire supplementaire."
                 ),
             },
             {
@@ -58,7 +62,7 @@ def detect_opportunities(texte):
                 "content": f"Voici un texte pour créer des opportunités :\n\n{texte}",
             },
         ],
-        temperature=1,
+        temperature=0.7,  # Température ajustée à 0.7
         max_completion_tokens=512,
         top_p=1,
         stream=True,
@@ -213,17 +217,17 @@ def extract_text_from_audio(file_path):
 
 def parse_opportunity_text(opportunity_text):
     """
-    Analyse le texte d'une opportunité et retourne un dictionnaire JSON.
+    Analyse le texte d'une opportunité et retourne un dictionnaire JSON avec les noms de champs Salesforce.
     """
     try:
-        # Exemple de parsing basé sur des champs spécifiques
+        # Mapping des champs locaux vers les champs Salesforce
         fields = {
-            "Étape": r"Étape\s*:\s*(.+)",
-            "Nom de l'opportunité": r"Nom de l'opportunité\s*:\s*(.+)",
-            "Nom du compte": r"Nom du compte\s*:\s*(.+)",
-            "Pays": r"Pays\s*:\s*(.+)",
-            "Date de clôture": r"Date de clôture\s*:\s*(.+)",
-            "Origine de la piste": r"Origine de la piste\s*:\s*(.+)",
+            "StageName": r"Étape\s*:\s*(.+)",
+            "Name": r"Nom de l'opportunité\s*:\s*(.+)",
+            "AccountName": r"Nom du compte\s*:\s*(.+)",
+            "Country__c": r"Pays\s*:\s*(.+)",
+            "CloseDate": r"Date de clôture\s*:\s*(.+)",
+            "LeadSource": r"Origine de la piste\s*:\s*(.+)",
             "Type": r"Type\s*:\s*(.+)"
         }
 

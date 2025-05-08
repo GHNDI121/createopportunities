@@ -45,9 +45,11 @@ def detect_opportunities(texte):
                     "- Nom du compte : nom de l'organisation mentionnée dans le texte.\n"
                     "- Pays : prend la valeur «Sénégal» par défaut sauf indication contraire.\n"
                     "- Date de clôture :\n"
-                    "    - si une date est mentionnée et reflète la limite du délai, c'est-à-dire une échéance, utilisez-la.\n"
-                    "    - sinon, fixez-la à une semaine après aujourd'hui (JOUR/MOIS/ANNEE : actuel) au format jj/mm/aaaa.\n"
-                    "    - si la date est mentionnée dans le texte, mais pas au format jj/mm/aaaa, utilisez le format jj/mm/aaaa.\n"
+                    "- Si une date est une **échéance**, utilise-la telle quelle.\n"
+                    "- Sinon, fixe la date **une semaine après aujourd’hui** et écris-la au format **jj/mm/aaaa**.\n"
+                    "- Si une date est mentionnée mais **pas au bon format**, convertis-la en **jj/mm/aaaa**.\n"
+                    "- Si seuls le **jour et le mois** sont donnés, ajoute **l’année actuelle**.\n"
+                    "- Si seuls le **mois et l’année** sont donnés, utilise **le dernier jour du mois** comme valeur de jour.\n"
                     "- Origine de la piste : prend la valeur «Demande client spontanée» par défaut.\n"
                     "- Type : choisir parmi les éléments suivants selon le contexte :\n"
                     "    - «vente directe»\n"
@@ -224,7 +226,7 @@ def parse_opportunity_text(opportunity_text):
         fields = {
             "StageName": r"Étape\s*:\s*(.+)",
             "Name": r"Nom de l'opportunité\s*:\s*(.+)",
-            "AccountId": r"Nom du compte\s*:\s*(.+)",  # Remplacement de AccountName par AccountId
+            "AccountId": r"Nom du compte\s*:\s*(.+)",  
             "Country__c": r"Pays\s*:\s*(.+)",
             "CloseDate": r"Date de clôture\s*:\s*(.+)",
             "LeadSource": r"Origine de la piste\s*:\s*(.+)",

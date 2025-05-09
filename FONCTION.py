@@ -11,6 +11,8 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 from tkinter import Tk, filedialog
 import re
+from datetime import datetime
+from simple_salesforce import Salesforce
 
 # Charger les variables d'environnement depuis le fichier key.env
 load_dotenv(dotenv_path="key.env")
@@ -222,7 +224,11 @@ def parse_opportunity_text(opportunity_text):
     Analyse le texte d'une opportunité et retourne un dictionnaire JSON avec les noms de champs Salesforce.
     """
     try:
-        from datetime import datetime
+
+        # Connexion à Salesforce
+        sf = Salesforce(username=os.getenv("SF_USERNAME"),
+                        password=os.getenv("SF_PASSWORD"),
+                        security_token=os.getenv("SF_SECURITY_TOKEN"))
 
         # Mapping des champs locaux vers les champs Salesforce
         fields = {

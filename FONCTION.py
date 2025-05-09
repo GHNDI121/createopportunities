@@ -11,6 +11,8 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 from tkinter import Tk, filedialog
 import re
+from datetime import datetime, timedelta
+from simple_salesforce import Salesforce
 
 # Charger les variables d'environnement depuis le fichier key.env
 load_dotenv(dotenv_path="key.env")
@@ -49,14 +51,27 @@ def detect_opportunities(texte):
                     "    - Sinon s'il n'y a pas de date ou de date representant le date de cloture, fixe la date **une semaine après aujourd’hui** et écris-la au format **jj/mm/aaaa**.\n"
                     "    - Si une date est mentionnée mais **pas au bon format**, convertis-la en **jj/mm/aaaa**.\n"
                     "    - Si seuls le **jour et le mois** sont donnés, ajoute **l’année actuelle** (EX: on est en 2025 , Si on nous donne le 25/04 , nous allons mettre comme date de cloture 25/04/2025).\n"
-                    "    - Si seuls le **mois et l’année** sont donnés, utilise **le dernier jour du mois** comme valeur de jour (EX: Si on nous donne le 25/04 , nous allons mettre comme date de cloture 30/04/2025.\n"
+                    "    - Si seuls le **mois et l’année** sont donnés, utilise **le dernier jour du mois** comme valeur de jour (EX: Si on nous donne le 25/04 , nous allons mettre comme date de cloture 30/04/2025).\n"
                     "- Origine de la piste : prend la valeur «Demande client spontanée» par défaut.\n"
                     "- Type : choisir parmi les éléments suivants selon le contexte :\n"
                     "    - «vente directe»\n"
                     "    - «renouvellement hors contrat»\n"
                     "    - «contrat de maintenance»\n"
-                    "    - «projet»\n\n"
-                    "Vous retournez uniquement les opportunités au format texte sans commentaire supplementaire."
+                    "    - «projet»\n"
+                    "- Date de depot : la date de traitement de l'opportunité c'est à dire de la création (par défaut aujourd'hui).\n"
+                    "- nature de dossier: choisir parmi «appels d’offre», «sans concurrence», «DRP», «DRPCO», «consultation» selon le contenu du texte.\n"
+                    "Remplissez également les champs MEDDIC suivants qui sont aussi importants pour la création d'opportunités :\n"
+                    "1. Métrique : objectif mesurable attendu (ex : gain, durée, réduction de coûts...),sinon analyse le contexte du texte du texte et en tirer la métrique\n"
+                    "2. Champion : personne interne au client qui pousse en faveur de l'achat (si connue), sinon mettre <à informer>\n"
+                    "3. Acheteur économique : décisionnaire financier (si connu), sinon mettre le nom du client\n"
+                    "4. Problème, challenge : problème ou besoin exprimé\n"
+                    "5. Critère de décision : éléments clés pour le choix d’un fournisseur, sinon mettre <à informer>\n"
+                    "6. Procédure de décision : étapes/processus d’achat, sinon mettre <à informer>\n"
+                    "7- Nature du livrable commercial: «offre» ou «budget» selon que le client attend une proposition chiffrée ou une estimation.\n\n"
+                    "8. Fiscalité : choisir parmi «HT», «HD», «HTC», «HTVA»\n"
+                    "9. Contact pour la livraison : personne à contacter pour la livraison (si connue)\n"
+                    "10. Contact pour l’exécution du projet : personne impliquée dans la mise en œuvre (si connue)\n\n"
+                    "Retournez uniquement les opportunités détectées, au format texte, sans aucun commentaire ou explication supplémentaire."
                 ),
             },
             {
@@ -222,23 +237,31 @@ def parse_opportunity_text(opportunity_text):
     Analyse le texte d'une opportunité et retourne un dictionnaire JSON avec les noms de champs Salesforce.
     """
     try:
-        from datetime import datetime
-        from simple_salesforce import Salesforce
-
         # Connexion à Salesforce
-        sf = Salesforce(username=os.getenv("SF_USERNAME"),
-                        password=os.getenv("SF_PASSWORD"),
-                        security_token=os.getenv("SF_SECURITY_TOKEN"))
+        sf = Salesforce(instance_url=os.getenv("SALESFORCE_BASE_URL"),
+                        session_id=os.getenv("accessToken"))
 
         # Mapping des champs locaux vers les champs Salesforce
         fields = {
             "StageName": r"Étape\s*:\s*(.+)",
             "Name": r"Nom de l'opportunité\s*:\s*(.+)",
-            "AccountId": r"Nom du compte\s*:\s*(.+)",  
+            "AccountId": r"Nom du compte\s*:\s*(.+)",
             "Pays__c": r"Pays\s*:\s*(.+)",
             "CloseDate": r"Date de clôture\s*:\s*(.+)",
             "LeadSource": r"Origine de la piste\s*:\s*(.+)",
-            "Type": r"Type\s*:\s*(.+)"
+            "Type": r"Type\s*:\s*(.+)",
+            "Date_Depot__c": r"Date de dépôt\s*:\s*(.+)",
+            "nature_de_dossier__c": r"Nature du dossier\s*:\s*(.+)",
+            "Nature_du_livrable_commercial__c": r"Nature du livrable commercial\s*:\s*(.+)",
+            "Contact_pour_la_livraison__c": r"Contact pour la livraison\s*:\s*(.+)",
+            "Contact_pour_execution_projet__c": r"Contact pour l’exécution du projet\s*:\s*(.+)",
+            "Métrique": r"Métrique\s*:\s*(.+)",
+            "Champion": r"Champion\s*:\s*(.+)",
+            "Acheteur_économique": r"Acheteur économique\s*:\s*(.+)",
+            "Problème_challenge": r"Problème, challenge\s*:\s*(.+)",
+            "Critère_de_décision": r"Critère de décision\s*:\s*(.+)",
+            "Procédure_de_décision": r"Procédure de décision\s*:\s*(.+)",
+            "Fiscalité": r"Fiscalité\s*:\s*(.+)"
         }
 
         parsed_data = {}
@@ -247,11 +270,15 @@ def parse_opportunity_text(opportunity_text):
             if match:
                 value = match.group(1).strip()
 
-                if key == "CloseDate":
+                if key in ["CloseDate", "Date_Depot__c"]:
                     try:
                         value = datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
                     except ValueError:
-                        raise ValueError(f"Format de date invalide pour CloseDate : {value}")
+                        # Si la date n'est pas valide, fixer une date par défaut
+                        if key == "CloseDate":
+                            value = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+                        elif key == "Date_Depot__c":
+                            value = datetime.now().strftime("%Y-%m-%d")
 
                 if key == "AccountId":
                     # Recherche de l'ID du compte sur Salesforce
@@ -263,7 +290,28 @@ def parse_opportunity_text(opportunity_text):
                     else:
                         raise ValueError(f"Aucun compte trouvé pour le nom : {account_name}")
 
+                if key in ["Contact_pour_la_livraison__c", "Contact_pour_execution_projet__c"]:
+                    if not value:
+                        # Recherche d'un contact lié au compte
+                        account_id = parsed_data.get("AccountId")
+                        if account_id:
+                            contact_query = f"SELECT Name FROM Contact WHERE AccountId = '{account_id}' LIMIT 1"
+                            contact_result = sf.query(contact_query)
+                            if contact_result['records']:
+                                value = contact_result['records'][0]['Name']
+                            else:
+                                value = "<à informer>"
+
                 parsed_data[key] = value
+
+        # Ajout des champs MEDDIC avec des valeurs par défaut si non renseignés
+        meddic_fields = [
+            "Métrique", "Champion", "Acheteur_économique", "Problème_challenge",
+            "Critère_de_décision", "Procédure_de_décision", "Fiscalité"
+        ]
+        for field in meddic_fields:
+            if field not in parsed_data:
+                parsed_data[field] = "<à informer>"
 
         return parsed_data
     except Exception as e:

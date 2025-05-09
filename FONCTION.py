@@ -11,8 +11,6 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 from tkinter import Tk, filedialog
 import re
-from datetime import datetime
-from simple_salesforce import Salesforce
 
 # Charger les variables d'environnement depuis le fichier key.env
 load_dotenv(dotenv_path="key.env")
@@ -224,6 +222,8 @@ def parse_opportunity_text(opportunity_text):
     Analyse le texte d'une opportunité et retourne un dictionnaire JSON avec les noms de champs Salesforce.
     """
     try:
+        from datetime import datetime
+        from simple_salesforce import Salesforce
 
         # Connexion à Salesforce
         sf = Salesforce(username=os.getenv("SF_USERNAME"),
@@ -247,12 +247,21 @@ def parse_opportunity_text(opportunity_text):
             if match:
                 value = match.group(1).strip()
 
-                
                 if key == "CloseDate":
                     try:
                         value = datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
                     except ValueError:
                         raise ValueError(f"Format de date invalide pour CloseDate : {value}")
+
+                if key == "AccountId":
+                    # Recherche de l'ID du compte sur Salesforce
+                    account_name = value
+                    query = f"SELECT Id FROM Account WHERE Name = '{account_name}' LIMIT 1"
+                    result = sf.query(query)
+                    if result['records']:
+                        value = result['records'][0]['Id']
+                    else:
+                        raise ValueError(f"Aucun compte trouvé pour le nom : {account_name}")
 
                 parsed_data[key] = value
 

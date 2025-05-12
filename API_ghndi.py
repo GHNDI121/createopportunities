@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse
 from pipeline import OpportunityPipeline
-from FONCTION import parse_opportunity_text
+from FONCTION import parse_opportunity_text, add_opportunity
 import os
 import shutil
 import requests
@@ -184,6 +184,13 @@ async def process_opportunity(file: UploadFile = File(None), text: str = Form(No
             # Si un texte brut est fourni
             texte = text
 
+        # Vérification des doublons avant d'ajouter au set des opportunités
+        if texte in pipeline.opportunities_set:
+            return {"message": "L'opportunité existe déjà.", "opportunity": texte}
+
+        # Ajouter l'opportunité au set
+        pipeline.opportunities_set.add(texte)
+
         # Traiter le texte pour détecter les opportunités
         pipeline.process_text(texte)
 
@@ -202,6 +209,7 @@ async def send_opportunities():
     Envoie directement les opportunités détectées à Salesforce après les avoir formatées en JSON.
     """
     try:
+        # Vérification des opportunités détectées par process_opportunity
         if not pipeline.opportunities_set:
             return {"message": "Aucune opportunité à envoyer."}
 
@@ -215,23 +223,16 @@ async def send_opportunities():
         for opportunity_text in pipeline.opportunities_set:
             # Formater l'opportunité en JSON
             opportunity_data = parse_opportunity_text(opportunity_text)
+            print(f"Données formatées pour Salesforce : {opportunity_data}")  # Log pour vérifier le contenu de opportunity_data
             if opportunity_data:
-                # URL de l'API Salesforce pour créer une opportunité
-                url = f"{salesforce_base_url}/services/data/v63.0/sobjects/Opportunity"
-
-                # En-têtes de la requête
-                headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json"
-                }
-
-                # Envoyer la requête POST
-                response = requests.post(url, json=opportunity_data, headers=headers)
-
-                if response.status_code == 201:
-                    opportunities.append(response.json())
+                # Appeler la fonction add_opportunity pour envoyer les données à Salesforce
+                result = add_opportunity(opportunity_data, access_token, salesforce_base_url)
+                if "error" in result:
+                    print(result["error"])
                 else:
-                    print(f"Erreur lors de l'envoi à Salesforce : {response.status_code}, {response.text}")
+                    opportunities.append(result)
+            else:
+                print("Erreur : L'opportunité n'a pas pu être formatée en JSON.")
 
         if opportunities:
             return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}

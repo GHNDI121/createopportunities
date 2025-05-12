@@ -58,20 +58,19 @@ def detect_opportunities(texte):
                     "    - «renouvellement hors contrat»\n"
                     "    - «contrat de maintenance»\n"
                     "    - «projet»\n"
-                    "- Date de depot : la date de traitement de l'opportunité c'est à dire de la création (par défaut aujourd'hui).\n"
+                    "- Date de dépôt : la date de traitement de l'opportunité c'est à dire la date de la création (par défaut aujourd'hui), mais La date de dépôt doit toujours être antérieure à la date de clôture.\n"
                     "- nature de dossier: choisir parmi «appels d’offre», «sans concurrence», «DRP», «DRPCO», «consultation» selon le contenu du texte.\n"
-                    "Remplissez également les champs MEDDIC suivants qui sont aussi importants pour la création d'opportunités :\n"
                     "1. Métrique : objectif mesurable attendu (ex : gain, durée, réduction de coûts...),sinon analyse le contexte du texte du texte et en tirer la métrique\n"
-                    "2. Champion : personne interne au client qui pousse en faveur de l'achat (si connue), sinon mettre <à informer>\n"
+                    "2. Champion : personne interne au client qui pousse en faveur de l'achat (si connue), sinon mettre à préciser\n"
                     "3. Acheteur économique : décisionnaire financier (si connu), sinon mettre le nom du client\n"
                     "4. Problème, challenge : problème ou besoin exprimé\n"
-                    "5. Critère de décision : éléments clés pour le choix d’un fournisseur, sinon mettre <à informer>\n"
-                    "6. Procédure de décision : étapes/processus d’achat, sinon mettre <à informer>\n"
+                    "5. Critère de décision : éléments clés pour le choix d’un fournisseur, sinon mettre à préciser\n"
+                    "6. Procédure de décision : étapes/processus d’achat, sinon mettre à préciser\n"
                     "7- Nature du livrable commercial: «offre» ou «budget» selon que le client attend une proposition chiffrée ou une estimation.\n\n"
                     "8. Fiscalité : choisir parmi «HT», «HD», «HTC», «HTVA»\n"
                     "9. Contact pour la livraison : personne à contacter pour la livraison (si connue)\n"
                     "10. Contact pour l’exécution du projet : personne impliquée dans la mise en œuvre (si connue)\n\n"
-                    "Retournez uniquement les opportunités détectées, au format texte, sans aucun commentaire ou explication supplémentaire."
+                    "Retournez uniquement les opportunités détectées, au format texte, en evitant les doublons, sans aucun commentaire ou explication supplémentaire."
                 ),
             },
             {
@@ -250,71 +249,112 @@ def parse_opportunity_text(opportunity_text):
             "CloseDate": r"Date de clôture\s*:\s*(.+)",
             "LeadSource": r"Origine de la piste\s*:\s*(.+)",
             "Type": r"Type\s*:\s*(.+)",
-            "Date_Depot__c": r"Date de dépôt\s*:\s*(.+)",
-            "nature_de_dossier__c": r"Nature du dossier\s*:\s*(.+)",
+            "Date_Depot__c": r"Date de dépôt\s*:\s*(.+)",  
+            "nature_de_dossier__c": r"Nature de dossier\s*:\s*(.+)",
             "Nature_du_livrable_commercial__c": r"Nature du livrable commercial\s*:\s*(.+)",
             "Contact_pour_la_livraison__c": r"Contact pour la livraison\s*:\s*(.+)",
-            "Contact_pour_execution_projet__c": r"Contact pour l’exécution du projet\s*:\s*(.+)",
-            "Métrique": r"Métrique\s*:\s*(.+)",
-            "Champion": r"Champion\s*:\s*(.+)",
-            "Acheteur_économique": r"Acheteur économique\s*:\s*(.+)",
-            "Problème_challenge": r"Problème, challenge\s*:\s*(.+)",
-            "Critère_de_décision": r"Critère de décision\s*:\s*(.+)",
-            "Procédure_de_décision": r"Procédure de décision\s*:\s*(.+)",
-            "Fiscalité": r"Fiscalité\s*:\s*(.+)"
+            "Contact_pour_l_ex_cution_du_projet__c": r"Contact pour l’exécution du projet\s*:\s*(.+)",
+            "metrique__c": r"Métrique\s*:\s*(.+)",
+            "Champion__c": r"Champion\s*:\s*(.+)",
+            "Acheteur_conomique__c": r"Acheteur économique\s*:\s*(.+)",
+            "Probl_me_challenge__c": r"Problème, challenge\s*:\s*(.+)",
+            "Crit_re_de_d_cision__c": r"Critère de décision\s*:\s*(.+)",
+            "Proc_dure_de_d_cision__c": r"Procédure de décision\s*:\s*(.+)",
+            "Fiscalit__c": r"Fiscalité\s*:\s*(.+)"
         }
+
+        valid_nature_de_dossier = ["Sans concurrence", "appels_offres", "drp", "consultation", "DRPCO"]
 
         parsed_data = {}
         for key, pattern in fields.items():
             match = re.search(pattern, opportunity_text)
             if match:
                 value = match.group(1).strip()
+                print(f"Champ extrait : {key} = {value}")  # Log des champs extraits
 
-                if key in ["CloseDate", "Date_Depot__c"]:
+                if key == "CloseDate":
                     try:
                         value = datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
                     except ValueError:
-                        # Si la date n'est pas valide, fixer une date par défaut
-                        if key == "CloseDate":
-                            value = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-                        elif key == "Date_Depot__c":
-                            value = datetime.now().strftime("%Y-%m-%d")
+                        print(f"Erreur de format de date pour CloseDate, valeur : {value}")
+                        value = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+                if key == "Date_Depot__c":
+                    try:
+                        value = datetime.strptime(value, "%d/%m/%Y").strftime("%Y-%m-%d")
+                    except ValueError:
+                        print(f"Erreur de format de date pour Date_Depot__c, valeur : {value}")
+                        value = datetime.now().strftime("%Y-%m-%d")
 
                 if key == "AccountId":
-                    # Recherche de l'ID du compte sur Salesforce
                     account_name = value
                     query = f"SELECT Id FROM Account WHERE Name = '{account_name}' LIMIT 1"
                     result = sf.query(query)
                     if result['records']:
                         value = result['records'][0]['Id']
                     else:
-                        raise ValueError(f"Aucun compte trouvé pour le nom : {account_name}")
+                        print(f"Aucun compte trouvé pour le nom : {account_name}")  # Log si aucun compte trouvé
+                        value = None
 
-                if key in ["Contact_pour_la_livraison__c", "Contact_pour_execution_projet__c"]:
-                    if not value:
-                        # Recherche d'un contact lié au compte
-                        account_id = parsed_data.get("AccountId")
-                        if account_id:
-                            contact_query = f"SELECT Name FROM Contact WHERE AccountId = '{account_id}' LIMIT 1"
-                            contact_result = sf.query(contact_query)
-                            if contact_result['records']:
-                                value = contact_result['records'][0]['Name']
+                if key in ["Contact_pour_la_livraison__c", "Contact_pour_l_ex_cution_du_projet__c"]:
+                    if value:
+                        contact_query = f"SELECT Id FROM Contact WHERE Name = '{value}' and AccountId = '{parsed_data.get('AccountId')}' LIMIT 1"
+                        contact_result = sf.query(contact_query)
+                        if not contact_result['records']:
+                            account_id = parsed_data.get("AccountId")
+                            if account_id:
+                                contact_query = f"SELECT Id, Name FROM Contact WHERE AccountId = '{account_id}' LIMIT 1"
+                                contact_result = sf.query(contact_query)
+                                if contact_result['records']:
+                                    value = contact_result['records'][0]['Id']
+                                else:
+                                    print(f"Aucun contact trouvé pour le compte : {account_id}")  # Log si aucun contact trouvé
+                                    value = None
                             else:
                                 value = "<à informer>"
+                    else:
+                        account_id = parsed_data.get("AccountId")
+                        if account_id:
+                            contact_query = f"SELECT Id, Name FROM Contact WHERE AccountId = '{account_id}' LIMIT 1"
+                            contact_result = sf.query(contact_query)
+                            if contact_result['records']:
+                                value = contact_result['records'][0]['Id']
+                            else:
+                                print(f"Aucun contact trouvé pour le compte : {account_id}")  # Log si aucun contact trouvé
+                                value = None
+
+                if key == "nature_de_dossier__c":
+                    if value not in valid_nature_de_dossier:
+                        print(f"Valeur invalide pour nature_de_dossier__c : {value}. Utilisation de la valeur par défaut.")
+                        value = "À préciser"
 
                 parsed_data[key] = value
-
-        # Ajout des champs MEDDIC avec des valeurs par défaut si non renseignés
-        meddic_fields = [
-            "Métrique", "Champion", "Acheteur_économique", "Problème_challenge",
-            "Critère_de_décision", "Procédure_de_décision", "Fiscalité"
-        ]
-        for field in meddic_fields:
-            if field not in parsed_data:
-                parsed_data[field] = "<à informer>"
+                print(f"Donnée formatée : {key} = {value}")  # Log des données formatées
 
         return parsed_data
+
     except Exception as e:
-        print(f"Erreur lors de l'analyse du texte de l'opportunité : {e}")
-        return {}
+        print(f"Erreur lors de l'analyse du texte de l'opportunité : {e}")  # Log des exceptions
+        return parsed_data  # Retourne les données partiellement extraites même en cas d'erreur
+
+def add_opportunity(opportunity_data, access_token, salesforce_base_url):
+    """
+    Ajoute une opportunité à Salesforce en utilisant la méthode insert de simple_salesforce.
+
+    :param opportunity_data: Dictionnaire contenant les données de l'opportunité formatée.
+    :param access_token: Jeton d'accès pour l'authentification Salesforce.
+    :param salesforce_base_url: URL de base de l'instance Salesforce.
+    :return: Réponse de Salesforce ou message d'erreur.
+    """
+    try:
+        # Connexion à Salesforce
+        sf = Salesforce(instance_url=salesforce_base_url, session_id=access_token)
+
+        # Insertion de l'opportunité
+        result = sf.Opportunity.create(opportunity_data)
+
+        return result
+
+    except Exception as e:
+        return {"error": f"Exception lors de l'insertion de l'opportunité : {str(e)}"}
 

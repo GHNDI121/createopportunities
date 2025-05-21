@@ -13,6 +13,7 @@ from tkinter import Tk, filedialog
 import re
 from datetime import datetime, timedelta
 from simple_salesforce import Salesforce
+import urllib.parse
 
 # Charger les variables d'environnement depuis le fichier key.env
 load_dotenv(dotenv_path="key.env")
@@ -59,7 +60,7 @@ def detect_opportunities(texte):
                     "    - «contrat de maintenance»\n"
                     "    - «projet»\n"
                     "- Date de dépôt : la date de traitement de l'opportunité c'est à dire la date de la création (par défaut aujourd'hui), mais La date de dépôt doit toujours être antérieure à la date de clôture.\n"
-                    "- nature de dossier: choisir parmi «appels d’offre», «sans concurrence», «DRP», «DRPCO», «consultation» selon le contenu du texte.\n"
+                    "- nature de dossier: choisir parmi «Appels d'offres», «Sans concurrence», «DRP», «DRPCO», «Consultation» selon le contenu du texte tout en respectant la syntaxe d'écriture.\n"
                     "1. Métrique : objectif mesurable attendu (ex : gain, durée, réduction de coûts...),sinon analyse le contexte du texte du texte et en tirer la métrique\n"
                     "2. Champion : personne interne au client qui pousse en faveur de l'achat (si connue), sinon mettre à préciser\n"
                     "3. Acheteur économique : décisionnaire financier (si connu), sinon mettre le nom du client\n"
@@ -263,7 +264,15 @@ def parse_opportunity_text(opportunity_text):
             "Fiscalit__c": r"Fiscalité\s*:\s*(.+)"
         }
 
-        valid_nature_de_dossier = ["Sans concurrence", "appels_offres", "drp", "consultation", "DRPCO"]
+        valid_nature_de_dossier = ["appels_offres", "Sans concurrence", "drp", "DRPCO", "consultation"]
+        # Mapping explicite des valeurs textuelles vers les noms d'API Salesforce attendus
+        nature_de_dossier_mapping = {
+            "Appels d'offres": "appels_offres",
+            "Sans concurrence": "Sans concurrence",
+            "DRP": "drp",
+            "DRPCO": "DRPCO",
+            "Consultation": "consultation"
+        }
 
         parsed_data = {}
         for key, pattern in fields.items():
@@ -287,7 +296,7 @@ def parse_opportunity_text(opportunity_text):
                         value = datetime.now().strftime("%Y-%m-%d")
 
                 if key == "AccountId":
-                    account_name = value
+                    account_name = value.replace("'", "\\'")
                     query = f"SELECT Id FROM Account WHERE Name = '{account_name}' LIMIT 1"
                     result = sf.query(query)
                     if result['records']:
@@ -324,8 +333,12 @@ def parse_opportunity_text(opportunity_text):
                                 value = None
 
                 if key == "nature_de_dossier__c":
-                    if value not in valid_nature_de_dossier:
-                        print(f"Valeur invalide pour nature_de_dossier__c : {value}. Utilisation de la valeur par défaut.")
+                    # Mapping direct sans normalisation
+                    mapped_value = nature_de_dossier_mapping.get(value)
+                    if mapped_value and mapped_value in valid_nature_de_dossier:
+                        value = mapped_value
+                    else:
+                        print(f"Valeur invalide pour nature_de_dossier__c : {value}")
                         value = "À préciser"
 
                 parsed_data[key] = value
@@ -358,3 +371,237 @@ def add_opportunity(opportunity_data, access_token, salesforce_base_url):
     except Exception as e:
         return {"error": f"Exception lors de l'insertion de l'opportunité : {str(e)}"}
 
+def create_compte(texte):
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Vous êtes commerciale, vous remplissez des champs pour la création d’un compte client dans un CRM.\n\n"
+                    "À partir d’un texte libre, vous devez extraire les informations utiles pour créer un compte client. Respectez STRICTEMENT les règles suivantes pour remplir ces champs obligatoires :\n\n"
+                    "- Type : valeur par défaut = «Prospect»\n"
+                    "- Nom du compte : à détecter dans le texte.\n"
+                    "- Classe de compte : choisir parmi la liste suivante selon le profil de l’organisation mentionnée :\n"
+                    "  Grand compte, Moyen compte, Petit compte, Administration publique, ONG, Partenaire stratégique, Fournisseur, Client final, Prospect, Distributeur, Interne\n"
+                    "- Téléphone : à détecter dans le texte si présent.\n"
+                    "- Secteur d’activité : choisir parmi la liste suivante :\n"
+                    "  btp-be ; education ; etablissement financier ; industrie mines oil and gas ; operateur telephonique et isp ; organismes et projet ; secteurs public et gouvernement ; société de service ; tourisme\n"
+                    "- Note client : Normal, Risqué, Top client (selon les termes utilisés dans le texte ou l’attitude perçue, sinon mettre «Normal»).\n"
+                    "- NINEA : détecter dans le texte si présent, sinon mettre «à compléter».\n"
+                    "- RC : détecter dans le texte si présent, sinon mettre «à compléter».\n"
+                    "- RSE : détecter dans le texte (si mentionné, mettre «oui», sinon «non», si aucune info, mettre «aucun»).\n"
+                    "- Normes et certification internationales : détecter dans le texte (si mentionné, mettre «oui», sinon «non», si aucune info, mettre «aucun»).\n\n"
+                    "⚠️ Si une information n’est pas trouvée, indique «à compléter» sauf pour les valeurs par défaut définies.\n"
+                    "⚠️ Retourne uniquement les champs obligatoires, sans aucun commentaire ni explication supplémentaire.\n\n"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Voici un texte pour créer un compte client :\n\n{texte}",
+            },
+        ],
+        temperature=0, 
+        max_completion_tokens=512,
+        top_p=1,
+        stream=True,
+        stop=None,
+    )
+
+    compte_text = ""
+    for chunk in completion:
+        if chunk.choices[0].delta.content:
+            compte_text += chunk.choices[0].delta.content
+
+    return compte_text
+
+def create_contact(texte):
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Vous êtes commerciale, vous remplissez des champs pour la création d’un contact dans un CRM.\n\n"
+                    "À partir d’un texte libre, vous devez extraire les informations nécessaires pour créer une fiche contact.\n\n"
+                    "Voici les règles strictes à suivre pour remplir les champs obligatoires :\n"
+                    "- Prénom : détecter dans le texte, sinon mettre «à compléter».\n"
+                    "- Nom : détecter dans le texte, sinon mettre «à compléter».\n"
+                    "- Nom du compte : organisation à laquelle est rattachée la personne, sinon «à compléter».\n"
+                    "- Fonction : choisir parmi la liste suivante (si proche dans le texte, prendre la plus proche correspondance) :\n"
+                    "  directeur general, directeur general adjoint, responsable achats, responsable administratif, DAF, DSI, directeur informatique, responsable informatique, responsable reseaux et systeme, responsable des marchés, RSSI, finances, directeur financier, responsable comptable, agent comptable\n"
+                    "- Adresse mail : détecter si présente, sinon récupérer un mail dans le texte.\n"
+                    "- Devise du compte : valeur fixe = «XOF - Franc CFA (BCEAO)»\n\n"
+                    "⚠️ Si une information est absente, mettre «à compléter», sauf pour la devise qui est toujours fixée.\n"
+                    "⚠️ Retourner uniquement les champs obligatoires, sans explication ni ajout.\n\n"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Voici un texte pour créer un contact :\n\n{texte}",
+            },
+        ],
+        temperature=0, 
+        max_completion_tokens=512,
+        top_p=1,
+        stream=True,
+        stop=None,
+    )
+
+    contact_text = ""
+    for chunk in completion:
+        if chunk.choices[0].delta.content:
+            contact_text += chunk.choices[0].delta.content
+
+    return contact_text
+
+def add_opportunity(opportunity_data, access_token, salesforce_base_url):
+    """
+    Ajoute une opportunité à Salesforce en utilisant la méthode insert de simple_salesforce.
+
+    :param opportunity_data: Dictionnaire contenant les données de l'opportunité formatée.
+    :param access_token: Jeton d'accès pour l'authentification Salesforce.
+    :param salesforce_base_url: URL de base de l'instance Salesforce.
+    :return: Réponse de Salesforce ou message d'erreur.
+    """
+    try:
+        # Connexion à Salesforce
+        sf = Salesforce(instance_url=salesforce_base_url, session_id=access_token)
+
+        # Insertion de l'opportunité
+        result = sf.Opportunity.create(opportunity_data)
+
+        return result
+
+    except Exception as e:
+        return {"error": f"Exception lors de l'insertion de l'opportunité : {str(e)}"}
+
+def add_contact(contact_data, access_token, salesforce_base_url):
+    """
+    Ajoute un contact à Salesforce.
+    :param contact_data: Dictionnaire contenant les données du contact formaté.
+    :param access_token: Jeton d'accès pour l'authentification Salesforce.
+    :param salesforce_base_url: URL de base de l'instance Salesforce.
+    :return: Réponse de Salesforce ou message d'erreur.
+    """
+    try:
+        sf = Salesforce(instance_url=salesforce_base_url, session_id=access_token)
+        result = sf.Contact.create(contact_data)
+        return result
+    except Exception as e:
+        return {"error": f"Exception lors de l'insertion du contact : {str(e)}"}
+
+def add_account(account_data, access_token, salesforce_base_url):
+    """
+    Ajoute un compte à Salesforce.
+    :param account_data: Dictionnaire contenant les données du compte formaté.
+    :param access_token: Jeton d'accès pour l'authentification Salesforce.
+    :param salesforce_base_url: URL de base de l'instance Salesforce.
+    :return: Réponse de Salesforce ou message d'erreur.
+    """
+    try:
+        sf = Salesforce(instance_url=salesforce_base_url, session_id=access_token)
+        result = sf.Account.create(account_data)
+        return result
+    except Exception as e:
+        return {"error": f"Exception lors de l'insertion du compte : {str(e)}"}
+
+def parse_contact_text(contact_text):
+    """
+    Analyse le texte d'un contact et retourne un dictionnaire JSON avec les noms de champs Salesforce.
+    Extraction par regex, pas de valeur par défaut, uniquement les champs extraits, nettoyage des clés.
+    """
+    try:
+        sf = Salesforce(instance_url=os.getenv("SALESFORCE_BASE_URL"), session_id=os.getenv("accessToken"))
+        fields = {
+            "FirstName": r"^[\-\•\s]*Pr[ée]nom\s*:\s*(.+?)(?:\n|$)",
+            "LastName": r"^[\-\•\s]*Nom\s*:\s*(.+?)(?:\n|$)",
+            "AccountId": r"^[\-\•\s]*Nom du compte\s*:\s*(.+?)(?:\n|$)",
+            "Fonction__c": r"^[\-\•\s]*Fonction\s*:\s*(.+?)(?:\n|$)",
+            "Email": r"^[\-\•\s]*Adresse mail\s*:\s*(.+?)(?:\n|$)",
+            "CurrencyIsoCode": r"^[\-\•\s]*Devise du compte\s*:\s*(.+?)(?:\n|$)"
+        }
+        contact_data = {}
+        # Extraction stricte prénom/nom
+        for key, pattern in fields.items():
+            match = re.search(pattern, contact_text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                value = match.group(1).strip()
+                print(f"Champ extrait : {key} = {value}")
+                if key == "AccountId":
+                    account_name = value.replace("'", "\\'")
+                    query = f"SELECT Id FROM Account WHERE Name = '{account_name}' LIMIT 1"
+                    try:
+                        result = sf.query(query)
+                        if result['records']:
+                            value = result['records'][0]['Id']
+                        else:
+                            print(f"Aucun compte trouvé pour le nom : {account_name}")
+                            value = None
+                    except Exception as e:
+                        print(f"Erreur lors de la recherche d'AccountId : {e}")
+                        value = None
+                contact_data[key] = value
+        # Devise toujours XOF
+        contact_data["CurrencyIsoCode"] = "XOF"
+        
+        # Nettoyage des clés non Salesforce
+        champs_sf = [
+            "FirstName", "LastName", "AccountId", "Fonction__c", "Email", "CurrencyIsoCode"
+        ]
+        contact_data = {k: v for k, v in contact_data.items() if k in champs_sf and v is not None}
+        return contact_data
+    except Exception as e:
+        print(f"Erreur lors du parsing du contact : {e}")
+        return {}
+
+def parse_account_text(account_text):
+    """
+    Analyse le texte d'un compte et retourne un dictionnaire JSON avec les noms de champs Salesforce.
+    Extraction par regex, pas de valeur par défaut, uniquement les champs extraits, nettoyage des clés.
+    """
+    try:
+        sf = Salesforce(instance_url=os.getenv("SALESFORCE_BASE_URL"), session_id=os.getenv("accessToken"))
+        fields = {
+            "Name": r"Nom du compte\s*:\s*(.+)",
+            "Type": r"Type\s*:\s*(.+)",
+            "class_id__c": r"Classe de compte\s*:\s*(.+)",
+            "Phone": r"T[ée]l[ée]phone\s*:\s*(.+)",
+            "Industry": r"Secteur d’activit[ée]\s*:\s*(.+)",
+            "Note_client__c": r"Note client\s*:\s*(.+)",
+            "Ninea__c": r"NINEA\s*:\s*(.+)",
+            "RC__c": r"RC\s*:\s*(.+)",
+            "RSE__c": r"RSE\s*:\s*(.+)",
+            "normes_certification__c": r"Normes? et certification[s]? internationales?\s*:\s*(.+)"
+        }
+        account_data = {}
+        for key, pattern in fields.items():
+            match = re.search(pattern, account_text, re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                print(f"Champ extrait : {key} = {value}")
+                if key == "class_id__c":
+                    classe_value = value
+                    classe_query = f"SELECT Id FROM Classe__c WHERE Name = '{classe_value}' LIMIT 1"
+                    classe_result = sf.query(classe_query)
+                    if classe_result['records']:
+                        classe_id = classe_result['records'][0]['Id']
+                    else:
+                        classe_create = sf.Classe__c.create({"Name": classe_value})
+                        classe_id = classe_create.get('id')
+                    account_data["class_id__c"] = classe_id
+                    print(f"Champ extrait : class_id__c = {classe_id}")
+                else:
+                    account_data[key] = value
+        for wrong_key in ["Classe_id__c", "classe_id__c"]:
+            if wrong_key in account_data:
+                del account_data[wrong_key]
+        champs_sf = [
+            "Name", "Type", "class_id__c", "Phone", "Industry", "Note_client__c",
+            "Ninea__c", "RC__c", "RSE__c", "normes_certification__c"
+        ]
+        account_data = {k: v for k, v in account_data.items() if k in champs_sf and v is not None}
+        return account_data
+    except Exception as e:
+        print(f"Erreur lors du parsing du compte : {e}")
+        return {}

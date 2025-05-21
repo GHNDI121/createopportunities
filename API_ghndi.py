@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse
 from pipeline import OpportunityPipeline
-from FONCTION import parse_opportunity_text, add_opportunity
+from FONCTION import parse_opportunity_text, add_opportunity, add_contact, add_account, parse_contact_text, parse_account_text
 import os
 import shutil
 import requests
@@ -29,6 +29,10 @@ app.add_middleware(
 # Initialisation du pipeline
 pipeline = OpportunityPipeline()
 
+# Ajout d'une variable globale pour stocker le dernier texte traité par process_opportunity
+last_processed_text = None
+
+# endpoint pour la connexion à Salesforce
 @app.get("/login")
 async def login():
     """
@@ -62,7 +66,7 @@ async def login():
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de la génération de l'URL d'authentification : {str(e)}"}, status_code=500)
 
-
+# endpoint pour le callback recuperer le jeton d'accés de salesforce et l'url
 @app.get("/callback")
 async def callback(code: str):
     """
@@ -121,7 +125,7 @@ async def callback(code: str):
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors du callback OAuth : {str(e)}"}, status_code=500)
 
-
+#endpoint pour vérifier la connexion à Salesforce
 @app.get("/check-connection/")
 async def check_connection():
     """
@@ -153,16 +157,40 @@ async def check_connection():
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de la vérification de la connexion : {str(e)}"}, status_code=500)
 
-# Endpoint pour traiter un fichier ou un texte pour créer des opportunités
-@app.post("/process-opportunity/")
-async def process_opportunity(file: UploadFile = File(None), text: str = Form(None), file_type: str = Form(None)):
+# Endpoint pour afficher les offres scrapées
+@app.get("/scraped-offers/")
+async def scraped_offers():
     """
-    Traite un fichier (image/audio) ou un texte pour détecter des opportunités.
+    Retourne la liste des offres scrapées à partir du notebook scraping.ipynb.
     """
     try:
+        from scraping import execute_notebook
+        notebook_path = "scraping.ipynb"
+        offres = execute_notebook(notebook_path)
+        if offres:
+            return {"offres": offres}
+        else:
+            return {"message": "Aucune offre scrapée trouvée."}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la récupération des offres scrapées : {str(e)}"}, status_code=500)
+
+# Endpoint pour traiter un fichier ou un texte pour créer des opportunités
+@app.post("/process-opportunity/")
+async def process_opportunity(
+    file: UploadFile = File(None), 
+    text: str = Form(None), 
+    file_type: str = Form(None), 
+    index: int = Form(None)
+    ):
+    """
+    Traite un fichier (image/audio), un texte, ou les offres scrapées pour détecter des opportunités.
+    Stocke le dernier texte traité dans last_processed_text pour usage par contact/compte.
+    """
+    global last_processed_text
+    try:
         # Vérification des entrées
-        if not file and not text:
-            return JSONResponse(content={"error": "Veuillez fournir un fichier ou un texte à traiter."}, status_code=400)
+        if not file and not text and file_type != "scraping":
+            return JSONResponse(content={"error": "Veuillez fournir un fichier, un texte ou choisir le scraping à traiter."}, status_code=400)
 
         if file:
             # Sauvegarder temporairement le fichier
@@ -176,23 +204,51 @@ async def process_opportunity(file: UploadFile = File(None), text: str = Form(No
             elif file_type == "audio":
                 texte = pipeline.handle_audio_file(temp_file_path)
             else:
-                return JSONResponse(content={"error": "Type de fichier non supporté. Utilisez 'image' ou 'audio'."}, status_code=400)
+                os.remove(temp_file_path)
+                return JSONResponse(content={"error": "Type de fichier non supporté. Utilisez 'image', 'audio' ou 'scraping'."}, status_code=400)
 
             # Supprimer le fichier temporaire
             os.remove(temp_file_path)
+            # Vérification des doublons avant d'ajouter au set des opportunités
+            if texte in pipeline.opportunities_set:
+                return {"message": "L'opportunité existe déjà.", "opportunity": texte}
+            # Ajouter l'opportunité au set
+            pipeline.opportunities_set.add(texte)
+            # Traiter le texte pour détecter les opportunités
+            pipeline.process_text(texte)
+            last_processed_text = texte
+        elif file_type == "scraping":
+            # Gestion du scraping : création d'opportunités à partir des offres scrapées
+            notebook_path = "scraping.ipynb"
+            from scraping import execute_notebook, dict_to_text
+            offres_data = execute_notebook(notebook_path)
+            if index is not None:
+                # On traite une seule offre, donc on peut définir last_processed_text
+                if offres_data and 0 <= index < len(offres_data):
+                    texte = dict_to_text(offres_data[index])
+                    pipeline.handle_scraped_offers(notebook_path, index=index)
+                    last_processed_text = texte
+            else:
+                # On traite toutes les offres, on stocke la liste de tous les textes traités
+                textes_traites = []
+                if offres_data:
+                    for offre in offres_data:
+                        texte = dict_to_text(offre)
+                        pipeline.handle_scraped_offers(notebook_path, index=None)
+                        textes_traites.append(texte)
+                    last_processed_text = textes_traites  # On stocke la liste complète
+            if pipeline.opportunities_set:
+                return {"message": "Opportunités scrapées détectées avec succès.", "opportunities": list(pipeline.opportunities_set)}
+            else:
+                return {"message": "Aucune opportunité détectée via le scraping."}
         else:
             # Si un texte brut est fourni
             texte = text
-
-        # Vérification des doublons avant d'ajouter au set des opportunités
-        if texte in pipeline.opportunities_set:
-            return {"message": "L'opportunité existe déjà.", "opportunity": texte}
-
-        # Ajouter l'opportunité au set
-        pipeline.opportunities_set.add(texte)
-
-        # Traiter le texte pour détecter les opportunités
-        pipeline.process_text(texte)
+            if texte in pipeline.opportunities_set:
+                return {"message": "L'opportunité existe déjà.", "opportunity": texte}
+            pipeline.opportunities_set.add(texte)
+            pipeline.process_text(texte)
+            last_processed_text = texte
 
         # Vérification des opportunités détectées
         if pipeline.opportunities_set:
@@ -201,6 +257,52 @@ async def process_opportunity(file: UploadFile = File(None), text: str = Form(No
             return {"message": "Aucune opportunité détectée."}
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors du traitement : {str(e)}"}, status_code=500)
+
+# endpoint pour créer un compte
+@app.post("/account_created/")
+async def account_created():
+    """
+    Crée un compte à partir du dernier texte traité par process_opportunity, en utilisant le modèle LLM et l'envoie à Salesforce.
+    """
+    global last_processed_text
+    try:
+        if not last_processed_text:
+            return JSONResponse(content={"error": "Aucun texte traité récemment. Veuillez d'abord appeler /process-opportunity/."}, status_code=400)
+        # Utiliser last_processed_text pour générer le compte
+        account_text = pipeline.process_account(last_processed_text)
+        # Récupérer le texte généré (retourner le texte pour le parser)
+        account_data = parse_account_text(account_text)
+        print(f"Données formatées pour Salesforce (Account) : {account_data}")  # Log pour vérifier le contenu de account_data
+        access_token = os.getenv("accessToken")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
+        result = add_account(account_data, access_token, salesforce_base_url)
+        return result
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la création du compte : {str(e)}"}, status_code=500)
+
+
+# Endpoint pour créer un contact
+@app.post("/contact_created/")
+async def contact_created():
+    """
+    Crée un contact à partir du dernier texte traité par process_opportunity, en utilisant le modèle LLM et l'envoie à Salesforce.
+    """
+    global last_processed_text
+    try:
+        if not last_processed_text:
+            return JSONResponse(content={"error": "Aucun texte traité récemment. Veuillez d'abord appeler /process-opportunity/."}, status_code=400)
+        # Utiliser last_processed_text pour générer le contact
+        contact_text = pipeline.process_contact(last_processed_text)
+        # Récupérer le texte généré (retourner le texte pour le parser)
+        contact_data = parse_contact_text(contact_text)
+        print(f"Données formatées pour Salesforce (Contact) : {contact_data}")
+        access_token = os.getenv("accessToken")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
+        result = add_contact(contact_data, access_token, salesforce_base_url)
+        return result
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la création du contact : {str(e)}"}, status_code=500)
+
 
 # Endpoint pour envoyer les opportunités à Salesforce
 @app.get("/send-opportunities/")

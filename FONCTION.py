@@ -379,6 +379,10 @@ def create_compte(texte):
                 "role": "system",
                 "content": (
                     "Vous êtes commerciale, vous remplissez des champs pour la création d’un compte client dans un CRM.\n\n"
+                    "Vous devez respecter STRICTEMENT les règles suivantes :\n"
+                    "1. Chaque compte correspond à une seule organisation distincte détectée dans le texte.\n"
+                    "2. Si plusieurs organisations sont mentionnées, créez un compte pour chacune.\n"
+                    "3. N'incluez **aucun doublon** (une organisation = un seul compte).\n"
                     "À partir d’un texte libre, vous devez extraire les informations utiles pour créer un compte client. Respectez STRICTEMENT les règles suivantes pour remplir ces champs obligatoires :\n\n"
                     "- Type : valeur par défaut = «Prospect»\n"
                     "- Nom du compte : à détecter dans le texte.\n"
@@ -423,6 +427,10 @@ def create_contact(texte):
                 "role": "system",
                 "content": (
                     "Vous êtes commerciale, vous remplissez des champs pour la création d’un contact dans un CRM.\n\n"
+                    "Vous devez respecter STRICTEMENT les règles suivantes :\n"
+                    "1. Chaque contact correspond à une seule personne mentionnée dans le texte.\n"
+                    "2. Si plusieurs personnes sont identifiées, créez une fiche contact pour chacune.\n"
+                    "3. Ne créez pas de doublons : une personne = un seul contact.\n"
                     "À partir d’un texte libre, vous devez extraire les informations nécessaires pour créer une fiche contact.\n\n"
                     "Voici les règles strictes à suivre pour remplir les champs obligatoires :\n"
                     "- Prénom : détecter dans le texte, sinon mettre «à compléter».\n"

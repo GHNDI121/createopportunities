@@ -6,6 +6,7 @@ import requests
 import os
 from dotenv import load_dotenv
 from scraping import execute_notebook, dict_to_text
+from offre import OffreScraper
 from memoire import ajouter_texte, texte_existe, ajouter_opportunite, opportunite_existe, ajouter_contact, ajouter_compte, contact_existe, compte_existe
 
 load_dotenv(dotenv_path="key.env")
@@ -64,6 +65,7 @@ class OpportunityPipeline:
         ajouter_texte(texte)
         return raw_opportunities
 
+
     def handle_scraped_offers(self, notebook_path, index=None):
         """
         Crée des opportunités à partir des offres scrapées.
@@ -91,6 +93,33 @@ class OpportunityPipeline:
                 self.process_text(texte)
                 if not texte_existe(texte):
                     ajouter_texte(texte)  # Ajout du texte à la mémoire seulement s'il n'existe pas déjà
+
+    def handle_scraped_offers_from_list(self, offres_data, index=None):
+        """
+        Crée des opportunités à partir d'une liste d'offres déjà extraites.
+        Si index est None, traite toutes les offres. Sinon, traite seulement l'offre à l'index donné.
+        """
+        if not offres_data:
+            print("Aucune offre scrapée dans le marché public.")
+            return
+
+        if index is not None:
+            # Créer une opportunité à partir d'une offre spécifique
+            try:
+                offre = offres_data[index]
+                texte = dict_to_text(offre)
+                self.process_text(texte)
+                if not texte_existe(texte):
+                    ajouter_texte(texte)
+            except IndexError:
+                print(f"Index {index} hors limites pour les offres scrapées.")
+        else:
+            # Créer des opportunités pour toutes les offres
+            for offre in offres_data:
+                texte = dict_to_text(offre)
+                self.process_text(texte)
+                if not texte_existe(texte):
+                    ajouter_texte(texte)
 
     def process_contact(self, texte):
         """

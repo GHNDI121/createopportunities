@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion Salesforce - Neurotech CRM</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <!-- Logo Neurotech -->
+      <img src="neurotech logo.jpg" alt="Logo Neurotech" />
+      <span class="logo-title">Neurotech CRM</span>
+    </div>
+    <div></div>
+    <!-- Bouton masqué pour la cohérence du header -->
+    <button class="send-btn invisible">Envoyer à Salesforce</button>
+  </div>
+  <div class="login-container">
+    <div class="login-logo">
+      <img src="neurotech logo.jpg" alt="Logo" />
+    </div>
+    <div class="login-title">Connexion Salesforce</div>
+    <!-- Bouton pour générer l'URL d'authentification -->
+    <button class="login-btn" id="generate-url">Générer l'URL d'authentification</button>
+    <div id="auth-url-output" class="login-link break-all"></div>
+    <!-- Bouton pour vérifier la connexion -->
+    <button class="check-btn" id="check-connection">Vérifier la connexion</button>
+    <div id="connection-status" class="login-link"></div>
+  </div>
+  <!-- Loader global pour actions longues -->
+  <div id="global-loader">
+    <div class="loader-spinner"></div>
+  </div>
+  <script>
+    // Afficher le loader global
+    function showGlobalLoader() {
+      document.getElementById('global-loader').style.display = 'flex';
+    }
+    // Masquer le loader global
+    function hideGlobalLoader() {
+      document.getElementById('global-loader').style.display = 'none';
+    }
+    // Fonctions pour afficher/masquer le loader
+    function showLoader() {
+      document.getElementById('global-loader').style.display = 'flex';
+    }
+    function hideLoader() {
+      document.getElementById('global-loader').style.display = 'none';
+    }
+
+    // Générer l'URL d'authentification
+    document.getElementById('generate-url').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/login');
+      const data = await res.json();
+      hideLoader();
+      if(data.auth_url) {
+        document.getElementById('auth-url-output').style.display = 'block';
+        document.getElementById('auth-url-output').innerHTML =
+          'Lien d\'authentification : <a href="' + data.auth_url + '" target="_blank" rel="noopener noreferrer">' + data.auth_url + '</a>';
+      } else {
+        document.getElementById('auth-url-output').style.display = 'block';
+        document.getElementById('auth-url-output').innerHTML =
+          '<span style="color:red;">Erreur : ' + (data.error || 'Impossible de générer l\'URL') + '</span>';
+      }
+    };
+    // Vérifier la connexion
+    document.getElementById('check-connection').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/check-connection/');
+      const data = await res.json();
+      hideLoader();
+      if(data.message && data.message.includes('réussie')) {
+        document.getElementById('connection-status').innerHTML =
+          '<span style="color:green;">' + data.message + '</span>';
+        setTimeout(() => { window.location.href = 'accueil.html'; }, 1200);
+      } else {
+        document.getElementById('connection-status').innerHTML =
+          '<span style="color:red;">' + (data.error || 'Connexion non valide') + '</span>';
+      }
+    };
+    // Affichage du token et de l'URL si callback
+    const params = new URLSearchParams(window.location.search);
+    if(params.has('access_token') && params.has('instance_url')) {
+      document.getElementById('auth-url-output').style.display = 'block';
+      document.getElementById('auth-url-output').innerHTML =
+        'Access Token : <span>' + params.get('access_token') + '</span><br>Instance URL : <span>' + params.get('instance_url') + '</span>';
+    }
+  </script>
+</body>
+</html>

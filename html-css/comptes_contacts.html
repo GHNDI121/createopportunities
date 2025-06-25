@@ -1,0 +1,465 @@
+<!--
+  Page Contacts & Comptes
+  - Affiche le menu de navigation (Process Opportunity, Contacts & Comptes, Offres Marché Scrapés)
+  - Permet de créer un compte ou un contact via l'API FastAPI
+  - Affiche les comptes et contacts créés sous forme de tableau
+  - Le bouton 'Envoyer à Salesforce' permet d'envoyer les opportunités à Salesforce
+  - Le logo utilisé est 'neurotech logo.jpg' (doit être présent dans le dossier html-css)
+-->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contacts &amp; Comptes</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <!-- Logo Neurotech -->
+      <img src="neurotech logo.jpg" alt="Logo Neurotech" />
+      <span class="logo-title">Neurotech CRM</span>
+    </div>
+    <nav class="menu">
+      <!-- Menu de navigation -->
+      <a href="accueil.html">Process Opportunity</a>
+      <a href="comptes_contacts.html" class="active">Contacts &amp; Comptes</a>
+      <a href="offres.html">Offres Marché Scrapés</a>
+    </nav>
+    <!-- Bouton d'envoi à Salesforce -->
+    <button class="send-btn" id="send-opportunity">Envoyer à Salesforce</button>
+  </div>
+  <div class="main-container">
+    <div class="section-header">
+      <div class="section-title">Compte &amp; Contact</div>
+    </div>
+    <div class="flex-row">
+      <div class="flex-2">
+        <!-- Onglets pour basculer entre comptes et contacts -->
+        <div class="tabs-row-with-actions">
+          <div class="tabs-row">
+            <button id="tab-accounts" class="chat-send-btn tab-btn active">Comptes créés</button>
+            <button id="tab-contacts" class="chat-send-btn tab-btn">Contacts créés</button>
+          </div>
+          <div class="section-actions-horizontal">
+            <button class="chat-send-btn" id="create-account">Créer un compte</button>
+            <button class="chat-send-btn" id="create-contact">Créer un contact</button>
+          </div>
+        </div>
+        <!-- Tableau des comptes créés -->
+        <div id="accounts-table-container">
+          <div class="table-container">
+            <table id="accounts-table">
+              <thead>
+                <tr>
+                  <th>Nom du compte</th>
+                  <th>Téléphone</th>
+                  <th>Secteur d’activité</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Tableau des contacts créés -->
+        <div id="contacts-table-container" style="display:none;">
+          <div class="table-container">
+            <table id="contacts-table">
+              <thead>
+                <tr>
+                  <th>Prénom</th>
+                  <th>Nom</th>
+                  <th>Nom du compte</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Modale détails (inchangée) -->
+        <div id="modal-bg" class="modal-bg">
+          <div class="modal-content" id="modal-content">
+            <button class="modal-close" id="modal-close">&times;</button>
+            <div id="modal-details"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Loader global pour actions longues -->
+  <div id="global-loader">
+    <div class="loader-spinner"></div>
+  </div>
+  <script>
+    // Gestion du menu : met à jour la couleur du bouton actif
+    document.querySelectorAll('.menu a').forEach(a => {
+      a.onclick = function() {
+        document.querySelectorAll('.menu a').forEach(x => x.classList.remove('active'));
+        this.classList.add('active');
+      };
+    });
+
+    // Fonction d'affichage d'une modale élégante
+    function showModal(html) {
+      document.getElementById('modal-details').innerHTML = html;
+      document.getElementById('modal-bg').classList.add('active');
+    }
+    document.getElementById('modal-close').onclick = function() {
+      document.getElementById('modal-bg').classList.remove('active');
+    };
+    // Fonctions pour afficher/masquer le loader
+    function showLoader() {
+      document.getElementById('global-loader').style.display = 'flex';
+    }
+    function hideLoader() {
+      document.getElementById('global-loader').style.display = 'none';
+    }
+    // Créer un compte : appel l'API FastAPI et ajoute la ligne dans le tableau
+    document.getElementById('create-account').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/account_created/', {method:'POST'});
+      let data = await res.json();
+      hideLoader();
+      let newAccounts = [];
+      if (data.raw_text) {
+        // Peut être un ou plusieurs comptes, séparés par double saut de ligne
+        const items = data.raw_text.split(/\n\s*\n/).filter(txt => txt.trim() && txt.trim() !== '-');
+        newAccounts = items.map(txt => {
+          const obj = parseAccountText(txt);
+          obj._raw = txt;
+          return obj;
+        }).filter(acc => acc.Name && acc.Name !== '-');
+      } else if (Array.isArray(data)) {
+        newAccounts = data.map(txt => {
+          const obj = parseAccountText(txt);
+          obj._raw = txt;
+          return obj;
+        }).filter(acc => acc.Name && acc.Name !== '-');
+      } else if (typeof data === 'string') {
+        if (data.trim() && data.trim() !== '-') {
+          const obj = parseAccountText(data);
+          obj._raw = data;
+          newAccounts = [obj];
+        }
+      } else if (data && data.Name && data.Name !== '-') {
+        data._raw = data.Name;
+        newAccounts = [data];
+      }
+      localStorage.setItem('accounts', JSON.stringify(newAccounts));
+      renderAccounts(newAccounts);
+    };
+    document.getElementById('create-contact').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/contact_created/', {method:'POST'});
+      let data = await res.json();
+      hideLoader();
+      let newContacts = [];
+      if (data.raw_text) {
+        const items = data.raw_text.split(/\n\s*\n/).filter(txt => txt.trim() && txt.trim() !== '-');
+        newContacts = items.map(txt => {
+          const obj = parseContactText(txt);
+          obj._raw = txt;
+          return obj;
+        }).filter(c => c.FirstName && c.FirstName !== '-');
+      } else if (Array.isArray(data)) {
+        newContacts = data.map(txt => {
+          const obj = parseContactText(txt);
+          obj._raw = txt;
+          return obj;
+        }).filter(c => c.FirstName && c.FirstName !== '-');
+      } else if (typeof data === 'string') {
+        if (data.trim() && data.trim() !== '-') {
+          const obj = parseContactText(data);
+          obj._raw = data;
+          newContacts = [obj];
+        }
+      } else if (data && data.FirstName && data.FirstName !== '-') {
+        data._raw = data.FirstName;
+        newContacts = [data];
+      }
+      localStorage.setItem('contacts', JSON.stringify(newContacts));
+      renderContacts(newContacts);
+    };
+    // Fonction utilitaire pour parser un texte de compte en objet
+    function parseAccountText(text) {
+      // Si le texte contient un objet JSON, on le parse directement
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) {
+        try {
+          const obj = JSON.parse(jsonMatch[0].replace(/'/g, '"'));
+          obj.Name = obj.Name || '-';
+          obj.Phone = obj.Phone || '-';
+          obj.Industry = obj.Industry || '-';
+          return obj;
+        } catch(e) {}
+      }
+      // Sinon, parsing ligne à ligne
+      const obj = {};
+      const mapping = {
+        'Nom du compte': 'Name',
+        'Type': 'Type',
+        'Classe de compte': 'class_id__c',
+        'Téléphone': 'Phone',
+        'Secteur d’activité': 'Industry',
+        'Note client': 'Note_client__c',
+        'NINEA': 'Ninea__c',
+        'RC': 'RC__c',
+        'RSE': 'RSE__c',
+        'Normes et certification internationales': 'normes_certification__c',
+        'Normes et certifications internationales': 'normes_certification__c'
+      };
+      (text.split('\n') || []).forEach(line => {
+        line = line.trim();
+        if (!line.startsWith('-')) return; // Ignore les lignes d'intro ou vides
+        line = line.replace(/^\s*-\s*/, ''); // Enlève le '- ' éventuel
+        const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
+        if (match) {
+          const label = match[1].trim();
+          const value = match[2].trim();
+          if (mapping[label]) {
+            obj[mapping[label]] = value;
+          }
+        }
+      });
+      obj.Name = obj.Name || '-';
+      obj.Phone = obj.Phone || '-';
+      obj.Industry = obj.Industry || '-';
+      return obj;
+    }
+    // Fonction utilitaire pour parser un texte de contact en objet
+    function parseContactText(text) {
+      // Si le texte contient un objet JSON, on le parse directement
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) {
+        try {
+          const obj = JSON.parse(jsonMatch[0].replace(/'/g, '"'));
+          obj.FirstName = obj.FirstName || '-';
+          obj.LastName = obj.LastName || '-';
+          obj.AccountId = obj.AccountId || '-';
+          return obj;
+        } catch(e) {}
+      }
+      // Sinon, parsing ligne à ligne
+      const obj = {};
+      const mapping = {
+        'Prénom': 'FirstName',
+        'Nom': 'LastName',
+        'Nom du compte': 'AccountId',
+        'Fonction': 'Fonction__c',
+        'Adresse mail': 'Email',
+        'Email': 'Email',
+        'Devise du compte': 'CurrencyIsoCode'
+      };
+      (text.split('\n') || []).forEach(line => {
+        line = line.trim();
+        if (!line.startsWith('-')) return; // Ignore les lignes d'intro ou vides
+        line = line.replace(/^\s*-\s*/, ''); // Enlève le '- ' éventuel
+        const match = line.match(/^([^:]+)\s*:\s*(.*)$/);
+        if (match) {
+          const label = match[1].trim();
+          const value = match[2].trim();
+          if (mapping[label]) {
+            obj[mapping[label]] = value;
+          }
+        }
+      });
+      obj.FirstName = obj.FirstName || '-';
+      obj.LastName = obj.LastName || '-';
+      obj.AccountId = obj.AccountId || '-';
+      return obj;
+    }
+    // Normalisation des comptes/contacts (pour affichage correct)
+    function normalizeAccounts(accounts) {
+      return (accounts || []).map(acc => typeof acc === 'string' ? parseAccountText(acc) : acc);
+    }
+    function normalizeContacts(contacts) {
+      return (contacts || []).map(c => typeof c === 'string' ? parseContactText(c) : c);
+    }
+    // Affichage automatique des derniers comptes et contacts depuis le localStorage au chargement de la page comptes_contacts.
+    // Affichage initial des comptes si déjà présents (localStorage)
+    function renderAccounts(accounts) {
+      const tbody = document.querySelector('#accounts-table tbody');
+      tbody.innerHTML = '';
+      normalizeAccounts(accounts).forEach((data, idx) => {
+        if (!data || !data.Name || data.Name === '-') return;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${data.Name || '-'}</td>
+          <td>${data.Phone || '-'}</td>
+          <td>${data.Industry || '-'}</td>
+        `;
+        tr.style.cursor = 'pointer';
+        tr.title = 'Voir le détail complet';
+        tr.onclick = function() {
+          let allFields = {};
+          if (typeof data === 'string') {
+            allFields = parseAccountText(data);
+          } else if (data._raw) {
+            allFields = parseAccountText(data._raw);
+          } else {
+            allFields = {...data};
+          }
+          let details = '<h3>Détail du compte</h3><table class="modal-table">';
+          Object.entries(allFields).forEach(([k,v]) => {
+            details += `<tr><td style='font-weight:bold;'>${k}</td><td>${v}</td></tr>`;
+          });
+          details += '</table>';
+          showModal(details);
+        };
+        tbody.appendChild(tr);
+      });
+    }
+    // Affichage initial des contacts si déjà présents (localStorage)
+    function renderContacts(contacts) {
+      const tbody = document.querySelector('#contacts-table tbody');
+      tbody.innerHTML = '';
+      normalizeContacts(contacts).forEach((data, idx) => {
+        if (!data || !data.FirstName || data.FirstName === '-') return;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${data.FirstName || '-'}</td>
+          <td>${data.LastName || '-'}</td>
+          <td>${data.AccountId || '-'}</td>
+        `;
+        tr.style.cursor = 'pointer';
+        tr.title = 'Voir le détail complet';
+        tr.onclick = function() {
+          let allFields = {};
+          if (typeof data === 'string') {
+            allFields = parseContactText(data);
+          } else if (data._raw) {
+            allFields = parseContactText(data._raw);
+          } else {
+            allFields = {...data};
+          }
+          let details = '<h3>Détail du contact</h3><table class="modal-table">';
+          Object.entries(allFields).forEach(([k,v]) => {
+            details += `<tr><td style='font-weight:bold;'>${k}</td><td>${v}</td></tr>`;
+          });
+          details += '</table>';
+          showModal(details);
+        };
+        tbody.appendChild(tr);
+      });
+    }
+    // Affichage au chargement si comptes/contacts déjà présents
+    if (localStorage.getItem('accounts')) {
+      try {
+        renderAccounts(JSON.parse(localStorage.getItem('accounts')));
+      } catch(e) {}
+    }
+    if (localStorage.getItem('contacts')) {
+      try {
+        renderContacts(JSON.parse(localStorage.getItem('contacts')));
+      } catch(e) {}
+    }
+    // Redirection vers la page de connexion si actualisation
+    if (performance.navigation.type === 1) {
+      window.location.href = 'index.html';
+    }
+    // Envoyer à Salesforce : appel l'API FastAPI pour envoyer les opportunités
+    document.getElementById('send-opportunity').onclick = async function() {
+      showLoader();
+      try {
+        const res = await fetch('http://localhost:8000/send-opportunities/');
+        const data = await res.json();
+        hideLoader();
+        if (data.error) {
+          if (data.error.includes('compte') || data.error.includes('Compte')) {
+            showErrorToast("Le compte n'existe pas. Veuillez créer un compte sur Salesforce.");
+            showCreateEntityButton('compte');
+          } else if (data.error.includes('contact') || data.error.includes('Contact')) {
+            showErrorToast("Le contact n'existe pas. Veuillez créer un contact sur Salesforce.");
+            showCreateEntityButton('contact');
+          } else {
+            showErrorToast(data.error);
+          }
+        } else if (data.message) {
+          showSuccessToast(data.message);
+        }
+      } catch (e) {
+        hideLoader();
+        showErrorToast('Erreur lors de l\'envoi des opportunités à Salesforce.');
+      }
+    };
+    // Affiche un bouton pour créer un compte ou un contact si besoin
+    function showCreateEntityButton(type) {
+      let container = document.createElement('div');
+      container.className = 'create-entity-container';
+      let btn = document.createElement('button');
+      btn.className = 'chat-send-btn';
+      btn.innerText = type === 'compte' ? 'Créer le compte' : 'Créer le contact';
+      btn.onclick = async function() {
+        showLoader();
+        try {
+          const res = await fetch(`http://localhost:8000/${type === 'compte' ? 'account_created' : 'contact_created'}/`, { method: 'POST' });
+          const data = await res.json();
+          hideLoader();
+          if (data.error) {
+            if (data.error.includes('incomplète') || data.error.includes('incomplete')) {
+              showErrorToast('Informations incomplètes pour créer le ' + type + '.');
+            } else {
+              showErrorToast(data.error);
+            }
+          } else if (data.result && data.result.error) {
+            showErrorToast(data.result.error);
+          } else {
+            showSuccessToast(type.charAt(0).toUpperCase() + type.slice(1) + ' créé avec succès !');
+            container.remove();
+          }
+        } catch (e) {
+          hideLoader();
+          showErrorToast('Erreur lors de la création du ' + type + '.');
+        }
+      };
+      container.appendChild(btn);
+      document.body.appendChild(container);
+    }
+    // Onglets comptes/contacts
+    document.getElementById('tab-accounts').onclick = function() {
+      document.getElementById('accounts-table-container').style.display = '';
+      document.getElementById('contacts-table-container').style.display = 'none';
+      this.classList.add('active');
+      document.getElementById('tab-contacts').classList.remove('active');
+    };
+    document.getElementById('tab-contacts').onclick = function() {
+      document.getElementById('accounts-table-container').style.display = 'none';
+      document.getElementById('contacts-table-container').style.display = '';
+      this.classList.add('active');
+      document.getElementById('tab-accounts').classList.remove('active');
+    };
+    // Amélioration de la modale : afficher dynamiquement tous les champs présents
+    function showModalDetailsDynamic(obj, title) {
+      let html = `<h3>${title}</h3>`;
+      if (obj._raw) {
+        html += `<pre style='white-space:pre-wrap;background:#f7f7f7;padding:10px;border-radius:6px;'>${obj._raw}</pre>`;
+      } else {
+        html += "<table class='modal-table'>";
+        Object.entries(obj).forEach(([k,v]) => {
+          if (k !== '_raw') html += `<tr><td style='font-weight:bold;'>${k}</td><td>${v}</td></tr>`;
+        });
+        html += '</table>';
+      }
+      showModal(html);
+    }
+    // Toasts de succès/erreur
+    function showSuccessToast(msg) {
+      showToast(msg, true);
+    }
+    function showErrorToast(msg) {
+      showToast(msg, false);
+    }
+    function showToast(msg, success) {
+      let toast = document.createElement('div');
+      toast.className = 'custom-toast ' + (success ? 'toast-success' : 'toast-error');
+      toast.innerHTML = success
+        ? `<svg width='24' height='24' style='vertical-align:middle;margin-right:8px;' fill='none' stroke='green' stroke-width='3' viewBox='0 0 24 24'><polyline points='20 6 10 18 4 12'></polyline></svg>`
+        : `<svg width='24' height='24' style='vertical-align:middle;margin-right:8px;' fill='none' stroke='red' stroke-width='3' viewBox='0 0 24 24'><line x1='18' y1='6' x2='6' y2='18'></line><line x1='6' y1='6' x2='18' y2='18'></line></svg>`;
+      toast.innerHTML += msg;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 2500);
+    }
+  </script>
+</body>
+</html>

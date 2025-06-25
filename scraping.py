@@ -1,5 +1,17 @@
 import nbformat 
 from nbconvert import PythonExporter 
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
+# Configurer Selenium avec ChromeDriver
+options = Options()
+options.add_argument('--headless')  # Exécuter en mode sans tête (sans interface graphique)
+options.add_argument('--disable-gpu')
+options.add_argument('--no-sandbox')
+# Configuration du driver avec le chemin local
+chrome_driver_path = "chromedriver-win64/chromedriver.exe"
+driver = webdriver.Chrome(service=Service(chrome_driver_path), options=options)
 
 def execute_notebook(notebook_path):
     """

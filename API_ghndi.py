@@ -3,8 +3,10 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pipeline import OpportunityPipeline
 from FONCTION import parse_opportunity_text, add_opportunity, add_contact, add_account, parse_contact_text, parse_account_text
+from offre import OffreScraper
 import os
 import shutil
 import requests
@@ -174,6 +176,7 @@ async def scraped_offers():
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de la récupération des offres scrapées : {str(e)}"}, status_code=500)
 
+
 # Endpoint pour traiter un fichier ou un texte pour créer des opportunités
 @app.post("/process-opportunity/")
 async def process_opportunity(
@@ -226,15 +229,15 @@ async def process_opportunity(
                 # On traite une seule offre, donc on peut définir last_processed_text
                 if offres_data and 0 <= index < len(offres_data):
                     texte = dict_to_text(offres_data[index])
-                    pipeline.handle_scraped_offers(notebook_path, index=index)
+                    pipeline.handle_scraped_offers_from_list(offres_data, index=index)
                     last_processed_text = texte
             else:
                 # On traite toutes les offres, on stocke la liste de tous les textes traités
                 textes_traites = []
                 if offres_data:
+                    pipeline.handle_scraped_offers_from_list(offres_data)
                     for offre in offres_data:
                         texte = dict_to_text(offre)
-                        pipeline.handle_scraped_offers(notebook_path, index=None)
                         textes_traites.append(texte)
                     last_processed_text = textes_traites  # On stocke la liste complète
             if pipeline.opportunities_set:
@@ -273,10 +276,13 @@ async def account_created():
         # Récupérer le texte généré (retourner le texte pour le parser)
         account_data = parse_account_text(account_text)
         print(f"Données formatées pour Salesforce (Account) : {account_data}")  # Log pour vérifier le contenu de account_data
+        # Vérification des champs obligatoires
+        if not account_data.get("Name") or not account_data.get("Type") or not account_data.get("class_id__c"):
+            return JSONResponse(content={"error": "Informations manquantes pour créer le compte. Veuillez compléter les champs obligatoires (Nom, Type, Classe de compte)."}, status_code=400)
         access_token = os.getenv("accessToken")
         salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
         result = add_account(account_data, access_token, salesforce_base_url)
-        return result
+        return {"result": result, "raw_text": account_text}
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de la création du compte : {str(e)}"}, status_code=500)
 
@@ -296,10 +302,13 @@ async def contact_created():
         # Récupérer le texte généré (retourner le texte pour le parser)
         contact_data = parse_contact_text(contact_text)
         print(f"Données formatées pour Salesforce (Contact) : {contact_data}")
+        # Vérification des champs obligatoires
+        if not contact_data.get("FirstName") or not contact_data.get("LastName") or not contact_data.get("AccountId"):
+            return JSONResponse(content={"error": "Informations manquantes pour créer le contact. Veuillez compléter les champs obligatoires (Prénom, Nom, Compte)."}, status_code=400)
         access_token = os.getenv("accessToken")
         salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
         result = add_contact(contact_data, access_token, salesforce_base_url)
-        return result
+        return {"result": result, "raw_text": contact_text}
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de la création du contact : {str(e)}"}, status_code=500)
 
@@ -311,7 +320,6 @@ async def send_opportunities():
     Envoie directement les opportunités détectées à Salesforce après les avoir formatées en JSON.
     """
     try:
-        # Vérification des opportunités détectées par process_opportunity
         if not pipeline.opportunities_set:
             return {"message": "Aucune opportunité à envoyer."}
 
@@ -323,18 +331,22 @@ async def send_opportunities():
             return JSONResponse(content={"error": "Les informations d'authentification Salesforce sont manquantes."}, status_code=400)
 
         for opportunity_text in pipeline.opportunities_set:
-            # Formater l'opportunité en JSON
             opportunity_data = parse_opportunity_text(opportunity_text)
-            print(f"Données formatées pour Salesforce : {opportunity_data}")  # Log pour vérifier le contenu de opportunity_data
-            if opportunity_data:
-                # Appeler la fonction add_opportunity pour envoyer les données à Salesforce
-                result = add_opportunity(opportunity_data, access_token, salesforce_base_url)
-                if "error" in result:
-                    print(result["error"])
-                else:
-                    opportunities.append(result)
+            print(f"Données formatées pour Salesforce : {opportunity_data}")
+            # Vérification explicite du compte
+            if not opportunity_data.get("AccountId"):
+                return JSONResponse(content={"error": "Compte introuvable ou informations manquantes pour le compte. Veuillez créer le compte ou compléter les informations."}, status_code=400)
+            # Vérification explicite du contact (si champ contact attendu)
+            contact_fields = ["Contact_pour_la_livraison__c", "Contact_pour_l_ex_cution_du_projet__c"]
+            for field in contact_fields:
+                if field in opportunity_data and not opportunity_data[field]:
+                    return JSONResponse(content={"error": "Contact introuvable ou informations manquantes pour le contact. Veuillez créer le contact ou compléter les informations."}, status_code=400)
+            result = add_opportunity(opportunity_data, access_token, salesforce_base_url)
+            if "error" in result:
+                print(result["error"])
+                return JSONResponse(content={"error": result["error"]}, status_code=400)
             else:
-                print("Erreur : L'opportunité n'a pas pu être formatée en JSON.")
+                opportunities.append(result)
 
         if opportunities:
             return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}
@@ -343,3 +355,11 @@ async def send_opportunities():
 
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de l'envoi : {str(e)}"}, status_code=500)
+
+# Monter le dossier html-css en tant que fichiers statiques
+app.mount("/static", StaticFiles(directory="html-css"), name="static")
+
+# Rediriger la racine vers l'interface utilisateur HTML
+@app.get("/")
+def root():
+    return RedirectResponse(url="/static/index.html")

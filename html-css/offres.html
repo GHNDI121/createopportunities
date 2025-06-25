@@ -1,0 +1,231 @@
+<!--
+  Page Offres Marché Public
+  - Affiche les offres scrapées sous forme de tableau
+  - Permet d'activer le scraping via un bouton
+  - Permet de créer une opportunité à partir d'une offre scrapée (bouton par ligne)
+  - Permet de créer toutes les opportunités scrapées (bouton global)
+  - Menu de navigation interactif
+  - Utilise le logo 'neurotech logo.jpg'
+-->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offres Marché Public</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <!-- Logo Neurotech -->
+      <img src="neurotech logo.jpg" alt="Logo Neurotech" />
+      <span class="logo-title">Neurotech CRM</span>
+    </div>
+    <nav class="menu">
+      <!-- Menu de navigation -->
+      <a href="accueil.html">Process Opportunity</a>
+      <a href="comptes_contacts.html">Contacts &amp; Comptes</a>
+      <a href="offres.html" class="active">Offres Marché Scrapés</a>
+    </nav>
+    <!-- Bouton d'envoi à Salesforce -->
+    <button class="send-btn" id="send-opportunity">Envoyer à Salesforce</button>
+  </div>
+  <div class="main-container">
+    <div class="section-title">Offres Marché Public Scrapées</div>
+    <!-- Bouton pour activer le scraping -->
+    <button class="chat-send-btn" id="scrape-btn">scrapées les offres</button>
+    <!-- Bouton pour créer toutes les opportunités scrapées -->
+    <button class="chat-send-btn mt-1" id="create-all-btn">Créer toutes les opportunités</button>
+    <div class="table-container">
+      <table id="offers-table">
+        <thead>
+          <tr>
+            <th>Référence</th>
+            <th>Objet</th>
+            <th>Autorité</th>
+            <th>Publié le</th>
+            <th>Date limite</th>
+            <th>Détail</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <!-- Modale pour affichage du détail complet -->
+  <div id="modal-bg" class="modal-bg">
+    <div class="modal-content">
+      <button class="modal-close" id="modal-close">&times;</button>
+      <div id="modal-details"></div>
+    </div>
+  </div>
+  <!-- Loader global pour actions longues -->
+  <div id="global-loader">
+    <div class="loader-spinner"></div>
+  </div>
+  <script>
+    let offresCache = [];
+    // Gestion du menu : met à jour la couleur du bouton actif
+    document.querySelectorAll('.menu a').forEach(a => {
+      a.onclick = function() {
+        document.querySelectorAll('.menu a').forEach(x => x.classList.remove('active'));
+        this.classList.add('active');
+      };
+    });
+    // Affichage initial des offres scrapées si déjà présentes (localStorage)
+    function renderOffers(offers) {
+      const tbody = document.querySelector('#offers-table tbody');
+      tbody.innerHTML = '';
+      offresCache = offers || [];
+      offresCache.forEach((offre, idx) => {
+        const tr = document.createElement('tr');
+        const extrait = (offre['Détail'] || '-').substring(0, 100) + ((offre['Détail']||'').length > 100 ? '...' : '');
+        tr.innerHTML = `
+          <td>${offre['Référence'] || '-'}</td>
+          <td>${offre['Objet'] || '-'}</td>
+          <td>${offre['Autorité'] || '-'}</td>
+          <td>${offre['Publié le'] || '-'}</td>
+          <td>${offre['Date limite'] || '-'}</td>
+          <td><span class='details-extrait' style='cursor:pointer;color:var(--blue);text-decoration:underline;' onclick='showDetails(${idx})'>${extrait}</span></td>
+          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer l'opportunité</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    // Affichage au chargement si offres déjà présentes
+    if (localStorage.getItem('offres')) {
+      try {
+        renderOffers(JSON.parse(localStorage.getItem('offres')));
+      } catch(e) {}
+    }
+    // Fonctions pour afficher/masquer le loader
+    function showLoader() {
+      document.getElementById('global-loader').style.display = 'flex';
+    }
+    function hideLoader() {
+      document.getElementById('global-loader').style.display = 'none';
+    }
+
+    // Charger les offres scrapées
+    document.getElementById('scrape-btn').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/scraped-offers/');
+      const data = await res.json();
+      hideLoader();
+      const tbody = document.querySelector('#offers-table tbody');
+      tbody.innerHTML = '';
+      offresCache = data.offres || [];
+      localStorage.setItem('offres', JSON.stringify(offresCache));
+      offresCache.forEach((offre, idx) => {
+        const tr = document.createElement('tr');
+        const extrait = (offre['Détail'] || '-').substring(0, 100) + ((offre['Détail']||'').length > 100 ? '...' : '');
+        tr.innerHTML = `
+          <td>${offre['Référence'] || '-'}</td>
+          <td>${offre['Objet'] || '-'}</td>
+          <td>${offre['Autorité'] || '-'}</td>
+          <td>${offre['Publié le'] || '-'}</td>
+          <td>${offre['Date limite'] || '-'}</td>
+          <td><span class='details-extrait' style='cursor:pointer;color:var(--blue);text-decoration:underline;' onclick='showDetails(${idx})'>${extrait}</span></td>
+          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer l'opportunité</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    };
+    // Fonction d'affichage du détail dans une modale
+    window.showDetails = function(idx) {
+      const offre = offresCache[idx];
+      document.getElementById('modal-details').innerText = offre['Détail'] || 'Aucun détail.';
+      document.getElementById('modal-bg').style.display = 'flex';
+    };
+    // Fermeture de la modale
+    document.getElementById('modal-close').onclick = function() {
+      document.getElementById('modal-bg').style.display = 'none';
+    };
+    // Créer une opportunité à partir d'une offre scrapée (index)
+    window.createOne = async function(idx) {
+      showLoader();
+      const res = await fetch('http://localhost:8000/process-opportunity/', {
+        method: 'POST',
+        body: new URLSearchParams({file_type: 'scraping', index: idx})
+      });
+      const data = await res.json();
+      hideLoader();
+      let opportunities = [];
+      if (localStorage.getItem('opportunities')) {
+        opportunities = JSON.parse(localStorage.getItem('opportunities'));
+      }
+      // Correction : filtrer et n'ajouter que les objets opportunité valides
+      let newOpps = [];
+      if (Array.isArray(data.opportunities)) {
+        newOpps = data.opportunities
+          .map(o => (typeof o === 'string' ? parseOpportunityText(o) : o))
+          .filter(o => o && (o.Name || o['Nom de l\'opportunité']));
+      } else if (data.opportunities) {
+        let o = typeof data.opportunities === 'string' ? parseOpportunityText(data.opportunities) : data.opportunities;
+        if (o && (o.Name || o['Nom de l\'opportunité'])) newOpps.push(o);
+      }
+      // Ajout à la liste existante
+      opportunities = opportunities.concat(newOpps);
+      localStorage.setItem('opportunities', JSON.stringify(opportunities));
+      // Redirection automatique vers la page d'accueil pour voir la nouvelle opportunité
+      window.location.href = 'accueil.html';
+    };
+    // Créer toutes les opportunités scrapées
+    document.getElementById('create-all-btn').onclick = async function() {
+      showLoader();
+      const res = await fetch('http://localhost:8000/process-opportunity/', {
+        method: 'POST',
+        body: new URLSearchParams({file_type: 'scraping'})
+      });
+      const data = await res.json();
+      hideLoader();
+      // Ajout dans le localStorage pour affichage dans la page opportunité
+      let opportunities = [];
+      if (localStorage.getItem('opportunities')) {
+        opportunities = JSON.parse(localStorage.getItem('opportunities'));
+      }
+      let newOpps = [];
+      if (Array.isArray(data.opportunities)) {
+        newOpps = data.opportunities
+          .map(o => (typeof o === 'string' ? parseOpportunityText(o) : o))
+          .filter(o => o && (o.Name || o['Nom de l\'opportunité']));
+      } else if (data.opportunities) {
+        let o = typeof data.opportunities === 'string' ? parseOpportunityText(data.opportunities) : data.opportunities;
+        if (o && (o.Name || o['Nom de l\'opportunité'])) newOpps.push(o);
+      }
+      opportunities = opportunities.concat(newOpps);
+      localStorage.setItem('opportunities', JSON.stringify(opportunities));
+      alert(data.message || 'Toutes les opportunités ont été créées !');
+    };
+    // Envoyer à Salesforce : appel l'API FastAPI pour envoyer les opportunités
+    document.getElementById('send-opportunity').onclick = async function() {
+      showLoader();
+      try {
+        const res = await fetch('http://localhost:8000/send-opportunities/');
+        const data = await res.json();
+        hideLoader();
+        if (data.error) {
+          if (data.error.includes('compte') || data.error.includes('Compte')) {
+            alert("Le compte n'existe pas. Veuillez créer un compte sur Salesforce.");
+          } else if (data.error.includes('contact') || data.error.includes('Contact')) {
+            alert("Le contact n'existe pas. Veuillez créer un contact sur Salesforce.");
+          } else {
+            alert(data.error);
+          }
+        } else if (data.message) {
+          alert(data.message);
+        }
+      } catch (e) {
+        hideLoader();
+        alert('Erreur lors de l\'envoi des opportunités à Salesforce.');
+      }
+    };
+    // Redirection vers la page de connexion si actualisation
+    if (performance.navigation.type === 1) {
+      window.location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>

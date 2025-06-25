@@ -14,7 +14,7 @@ pipeline {
       // nom de l’image docker 
         DOCKER_IMAGE = "${DOCKER_USERNAME}/tp-app:${IMAGE_VERSION}"  
      // nom du conteneur 
-        DOCKER_CONTAINER = "automatisation_processus_neurotech"  
+        DOCKER_CONTAINER = "automatisation_processus_neurotech-${BUILD_NUMBER}"  
      // Identifiants Docker Hub 
         DOCKER_CREDENTIALS = credentials("150c4e91-a7dc-4177-bd6e-e0fe4d7abde4")  
  
@@ -74,7 +74,7 @@ pipeline {
  
                   // Lancer le conteneur 
                     bat """ 
-                        docker  run  -d  --name  $DOCKER_CONTAINER  -p  8080:80  $DOCKER_IMAGE 
+                        docker  run  -d  --name  $DOCKER_CONTAINER  -p  8880:80  $DOCKER_IMAGE 
                     """ 
                 } 
             } 

@@ -41,10 +41,7 @@ class OpportunityPipeline:
             return None
 
     def process_text(self, texte):
-        # Vérifier si le texte a déjà été utilisé
-        if texte_existe(texte):
-            print("Ce texte a déjà été utilisé pour créer une opportunité. Ignoré.")
-            return
+        # Extraire les opportunités du texte sans vérifier si le texte a déjà été utilisé
         raw_opportunities = detect_opportunities(texte)
         # Séparer chaque opportunité par des lignes vides
         blocs = re.split(r"\n\s*\n", raw_opportunities.strip())

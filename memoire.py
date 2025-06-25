@@ -36,6 +36,33 @@ def ajouter_opportunite(opportunite: Dict):
         with open(OPPORTUNITES_FILE, "w", encoding="utf-8") as f:
             json.dump(opportunites, f, ensure_ascii=False, indent=2)
 
+def supprimer_opportunite(opportunite: dict):
+    """
+    Supprime une opportunité du fichier memoire_opportunites.json si elle existe.
+    La recherche se fait sur le champ 'texte' s'il existe, sinon sur 'Name' ou un ensemble de champs principaux.
+    """
+    opportunites = charger_opportunites()
+    key_fields = ["texte", "Name", "Nom de l'opportunité"]
+    # Trouver la clé d'identification présente
+    for key in key_fields:
+        if key in opportunite:
+            value = opportunite[key]
+            for o in opportunites:
+                if o.get(key) == value:
+                    opportunites.remove(o)
+                    with open(OPPORTUNITES_FILE, "w", encoding="utf-8") as f:
+                        json.dump(opportunites, f, ensure_ascii=False, indent=2)
+                    return True
+            break  # On ne cherche qu'une seule clé d'identification
+    # Si aucune clé unique, on tente une correspondance partielle sur les champs principaux
+    for o in opportunites:
+        if all(opportunite.get(k) == o.get(k) for k in opportunite.keys() if k in o):
+            opportunites.remove(o)
+            with open(OPPORTUNITES_FILE, "w", encoding="utf-8") as f:
+                json.dump(opportunites, f, ensure_ascii=False, indent=2)
+            return True
+    return False
+
 def opportunite_existe(opportunite: Dict) -> bool:
     return opportunite in charger_opportunites()
 

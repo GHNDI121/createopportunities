@@ -184,18 +184,36 @@
       });
       // Gestion suppression
       document.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.onclick = function(e) {
+        btn.onclick = async function(e) {
           e.stopPropagation();
           const idx = parseInt(this.getAttribute('data-idx'));
           let opportunities = JSON.parse(localStorage.getItem('opportunities')) || [];
-          opportunities.splice(idx, 1);
-          localStorage.setItem('opportunities', JSON.stringify(opportunities));
-          // Mettre à jour le statut d'envoi
-          let sentStatus = JSON.parse(localStorage.getItem('opportunities_sent_status')) || {};
-          const key = opportunities[idx]?.Name || idx;
-          delete sentStatus[key];
-          localStorage.setItem('opportunities_sent_status', JSON.stringify(sentStatus));
-          renderOpportunities(opportunities);
+          const opp = opportunities[idx];
+          // Appel API pour suppression côté serveur
+          try {
+            const response = await fetch('http://localhost:8000/delete-opportunity/', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(opp)
+            });
+            const data = await response.json();
+            if (response.ok) {
+              // Suppression locale seulement si succès côté serveur
+              opportunities.splice(idx, 1);
+              localStorage.setItem('opportunities', JSON.stringify(opportunities));
+              // Mettre à jour le statut d'envoi
+              let sentStatus = JSON.parse(localStorage.getItem('opportunities_sent_status')) || {};
+              const key = opp.Name || idx;
+              delete sentStatus[key];
+              localStorage.setItem('opportunities_sent_status', JSON.stringify(sentStatus));
+              renderOpportunities(opportunities);
+              showSuccessToast('Opportunité supprimée avec succès.');
+            } else {
+              showErrorToast(data.error || 'Erreur lors de la suppression côté serveur.');
+            }
+          } catch (err) {
+            showErrorToast('Erreur réseau lors de la suppression.');
+          }
         };
       });
       // Gestion envoi individuel

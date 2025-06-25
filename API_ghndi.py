@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pipeline import OpportunityPipeline
 from FONCTION import parse_opportunity_text, add_opportunity, add_contact, add_account, parse_contact_text, parse_account_text
 from offre import OffreScraper
+from memoire import supprimer_opportunite, charger_opportunites, purger_opportunites_anciennes
 import os
 import shutil
 import requests
@@ -261,6 +262,22 @@ async def process_opportunity(
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors du traitement : {str(e)}"}, status_code=500)
 
+# Endpoint pour supprimer une opportunité
+@app.delete("/delete-opportunity/")
+async def delete_opportunity(opportunite: dict):
+    """
+    Supprime une opportunité du fichier mémoire_opportunites.json.
+    L'opportunité doit être envoyée dans le body de la requête (format JSON).
+    """
+    try:
+        success = supprimer_opportunite(opportunite)
+        if success:
+            return {"message": "Opportunité supprimée avec succès."}
+        else:
+            return JSONResponse(content={"error": "Opportunité non trouvée."}, status_code=404)
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de la suppression : {str(e)}"}, status_code=500)
+    
 # endpoint pour créer un compte
 @app.post("/account_created/")
 async def account_created():
@@ -363,3 +380,14 @@ app.mount("/static", StaticFiles(directory="html-css"), name="static")
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
+
+@app.post("/purge-old-opportunities/")
+async def purge_old_opportunities():
+    """
+    Supprime toutes les opportunités de plus de 36h de la mémoire côté serveur.
+    """
+    try:
+        nb_supprimees = purger_opportunites_anciennes()
+        return {"message": f"{nb_supprimees} opportunité(s) ancienne(s) supprimée(s) de la mémoire."}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors du nettoyage : {str(e)}"}, status_code=500)

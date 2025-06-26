@@ -613,3 +613,109 @@ def parse_account_text(account_text):
     except Exception as e:
         print(f"Erreur lors du parsing du compte : {e}")
         return {}
+
+def create_prospect(texte):
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Vous êtes commerciale, vous remplissez des champs pour la création d’un prospect dans un CRM.\n\n"
+                    "Vous devez respecter STRICTEMENT les règles suivantes :\n"
+                    "1. Chaque prospect correspond à une seule personne ou organisation détectée dans le texte.\n"
+                    "2. Si plusieurs prospects sont mentionnés, créez une fiche pour chacun.\n"
+                    "3. N'incluez **aucun doublon** (une personne/organisation = un seul prospect).\n"
+                    "À partir d’un texte libre, vous devez extraire les informations utiles pour créer un prospect. Respectez STRICTEMENT les règles suivantes pour remplir ces champs obligatoires :\n\n"
+                    "- Statut de la piste : choisir parmi 'en cours' (par défaut), 'contacté', 'qualifié', 'disqualifié'.\n"
+                    "- Prénom : détecter dans le texte, sinon mettre 'à compléter'.\n"
+                    "- Nom : détecter dans le texte, sinon mettre 'à compléter'.\n"
+                    "- Société : nom complet de l'organisation mentionnée dans le texte, sinon 'à compléter'.\n"
+                    "- Téléphone : detecter un contact (numero) dans le texte.\n"
+                    "- Fonction : choisir parmi la liste suivante (si proche dans le texte, prendre la plus proche correspondance) :\n"
+                    "  directeur general, directeur general adjoint, responsble achats, responsable administratif, DAF, DSI, Directeur informatique, responsable informatique, responsable reseaux et systeme, autre\n"
+                    "- Adresse email : détecter et recuperer un seul mail n'importe lequel pouvant servir de contact si présente dans le texte; si t'en trouve 2 prend le plus pertinent selon ton analyse'.\n"
+                    "- Fonction autre : mettre la fonction occupée par le prospect si différente de la liste.\n"
+                    "- Secteur d’activité : choisir parmi la liste suivante :\n"
+                    "  btp-be ; education ; etablissement financier ; industrie mines oil and gas ; operateur telephonique et isp ; organismes et projet ; secteurs public et gouvernement ; société de service ; tourisme\n"
+                    "- Description : mettre le résumé de l’offre sur les axes les plus importants à retenir, sinon 'à compléter'.\n\n"
+                    "⚠️ Si une information n’est pas trouvée, indique 'à compléter' sauf pour les valeurs par défaut définies.\n"
+                    "⚠️ Si le champs Fonction n'est pas 'autre', il ne faut jamais creer le champs fonction autres car elle n'est pas obligatoires mais fonctionnel , elle depend du champs fonction.\n"
+                    "⚠️ Retourne uniquement les champs obligatoires, sans aucun commentaire ni explication supplémentaire.\n\n"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Voici un texte pour créer un prospect :\n\n{texte}",
+            },
+        ],
+        temperature=0, 
+        max_completion_tokens=512,
+        top_p=1,
+        stream=True,
+        stop=None,
+    )
+    prospect_text = ""
+    for chunk in completion:
+        if chunk.choices[0].delta.content:
+            prospect_text += chunk.choices[0].delta.content
+    return prospect_text
+
+
+def parse_prospect_text(prospect_text):
+    """
+    Analyse le texte d'un prospect et retourne un dictionnaire JSON avec les noms de champs Salesforce.
+    Extraction par regex, gestion robuste du nom/prénom/société (apostrophes incluses), nettoyage des clés.
+    """
+    try:
+        sf = Salesforce(instance_url=os.getenv("SALESFORCE_BASE_URL"), session_id=os.getenv("accessToken"))
+        fields = {
+            "Status": r"^[\-\•\s]*Statut de la piste\s*:\s*(.+?)(?:\n|$)",
+            "FirstName": r"^[\-\•\s]*Pr[ée]nom\s*:\s*(.+?)(?:\n|$)",
+            "LastName": r"^[\-\•\s]*Nom\s*:\s*(.+?)(?:\n|$)",
+            "Company": r"^[\-\•\s]*Soci[ée]t[ée]\s*:\s*(.+?)(?:\n|$)",
+            "Phone": r"^[\-\•\s]*T[ée]l[ée]phone\s*:\s*(.+?)(?:\n|$)",
+            "Fonction__c": r"^[\-\•\s]*Fonction\s*:\s*(.+?)(?:\n|$)",
+            "Email": r"^[\-\•\s]*Adresse email\s*:\s*(.+?)(?:\n|$)",
+            "Fonction_autre__c": r"^[\-\•\s]*Fonction autre\s*:\s*(.+?)(?:\n|$)",
+            "industry": r"^[\-\•\s]*Secteur d’activit[ée]\s*:\s*(.+?)(?:\n|$)",
+            "Description": r"^[\-\•\s]*Description\s*:\s*(.+?)(?:\n|$)"
+        }
+        prospect_data = {}
+        for key, pattern in fields.items():
+            match = re.search(pattern, prospect_text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                value = match.group(1).strip()
+                print(f"Champ extrait : {key} = {value}")
+                # Gestion spéciale pour Company (apostrophes)
+                if key == "Company":
+                    company_name = value.replace("'", "\\'")
+                    # Vérification existence société dans Salesforce (optionnel)
+                    # query = f"SELECT Id FROM Account WHERE Name = '{company_name}' LIMIT 1"
+                    # result = sf.query(query)
+                    # if result['records']:
+                    #     value = result['records'][0]['Id']
+                prospect_data[key] = value
+        champs_sf = list(fields.keys())
+        prospect_data = {k: v for k, v in prospect_data.items() if k in champs_sf and v is not None}
+        return prospect_data
+    except Exception as e:
+        print(f"Erreur lors du parsing du prospect : {e}")
+        return {}
+
+
+def add_prospect(prospect_data, access_token, salesforce_base_url):
+    """
+    Ajoute un prospect à Salesforce.
+    :param prospect_data: Dictionnaire contenant les données du prospect formaté.
+    :param access_token: Jeton d'accès pour l'authentification Salesforce.
+    :param salesforce_base_url: URL de base de l'instance Salesforce.
+    :return: Réponse de Salesforce ou message d'erreur.
+    """
+    try:
+        sf = Salesforce(instance_url=salesforce_base_url, session_id=access_token)
+        # À adapter selon l'objet Salesforce utilisé pour les prospects (ex: Lead, Prospect__c, etc.)
+        result = sf.Lead.create(prospect_data)
+        return result
+    except Exception as e:
+        return {"error": f"Exception lors de l'insertion du prospect : {str(e)}"}

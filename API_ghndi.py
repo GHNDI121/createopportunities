@@ -1,13 +1,13 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pipeline import OpportunityPipeline
-from FONCTION import parse_opportunity_text, add_opportunity, add_contact, add_account, parse_contact_text, parse_account_text
+from FONCTION import parse_prospect_text, add_prospect, add_contact, add_account, parse_contact_text, parse_account_text, parse_opportunity_text, add_opportunity
 from offre import OffreScraper
-from memoire import supprimer_opportunite, charger_opportunites, purger_opportunites_anciennes
+from memoire import supprimer_opportunite, charger_opportunites
 import os
 import shutil
 import requests
@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import base64
 import hashlib
 import secrets
+import json
 
 app = FastAPI()
 
@@ -165,12 +166,16 @@ async def check_connection():
 async def scraped_offers():
     """
     Retourne la liste des offres scrapées à partir du notebook scraping.ipynb.
+    Stocke les offres dans memoire_offres.json pour éviter de rescraper à chaque fois.
     """
     try:
         from scraping import execute_notebook
         notebook_path = "scraping.ipynb"
         offres = execute_notebook(notebook_path)
         if offres:
+            # Stocker les offres dans memoire_offres.json
+            with open("memoire_offres.json", "w", encoding="utf-8") as f:
+                json.dump(offres, f, ensure_ascii=False, indent=2)
             return {"offres": offres}
         else:
             return {"message": "Aucune offre scrapée trouvée."}
@@ -222,25 +227,37 @@ async def process_opportunity(
             pipeline.process_text(texte)
             last_processed_text = texte
         elif file_type == "scraping":
-            # Gestion du scraping : création d'opportunités à partir des offres scrapées
-            notebook_path = "scraping.ipynb"
-            from scraping import execute_notebook, dict_to_text
-            offres_data = execute_notebook(notebook_path)
+            # Utiliser les offres stockées si elles existent
+            import os
+            offres_data = None
+            if os.path.exists("memoire_offres.json"):
+                try:
+                    with open("memoire_offres.json", "r", encoding="utf-8") as f:
+                        offres_data = json.load(f)
+                except Exception as e:
+                    offres_data = None
+            if not offres_data:
+                # Si pas de cache, rescraper
+                from scraping import execute_notebook, dict_to_text
+                notebook_path = "scraping.ipynb"
+                offres_data = execute_notebook(notebook_path)
+                # Stocker pour la prochaine fois
+                with open("memoire_offres.json", "w", encoding="utf-8") as f:
+                    json.dump(offres_data, f, ensure_ascii=False, indent=2)
+            from scraping import dict_to_text
             if index is not None:
-                # On traite une seule offre, donc on peut définir last_processed_text
                 if offres_data and 0 <= index < len(offres_data):
                     texte = dict_to_text(offres_data[index])
                     pipeline.handle_scraped_offers_from_list(offres_data, index=index)
                     last_processed_text = texte
             else:
-                # On traite toutes les offres, on stocke la liste de tous les textes traités
                 textes_traites = []
                 if offres_data:
                     pipeline.handle_scraped_offers_from_list(offres_data)
                     for offre in offres_data:
                         texte = dict_to_text(offre)
                         textes_traites.append(texte)
-                    last_processed_text = textes_traites  # On stocke la liste complète
+                    last_processed_text = textes_traites
             if pipeline.opportunities_set:
                 return {"message": "Opportunités scrapées détectées avec succès.", "opportunities": list(pipeline.opportunities_set)}
             else:
@@ -330,6 +347,34 @@ async def contact_created():
         return JSONResponse(content={"error": f"Erreur lors de la création du contact : {str(e)}"}, status_code=500)
 
 
+# Endpoint pour envoyer un prospect à Salesforce
+@app.post("/send-prospect/")
+async def send_prospect(prospect: dict = Body(...)):
+    """
+    Envoie un prospect unique à Salesforce (objet Lead).
+    """
+    try:
+        access_token = os.getenv("accessToken")
+        salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
+        if not access_token or not salesforce_base_url:
+            return JSONResponse(content={"error": "Les informations d'authentification Salesforce sont manquantes."}, status_code=400)
+        # On parse le prospect si besoin (si c'est un texte)
+        if isinstance(prospect, str):
+            from FONCTION import parse_prospect_text
+            prospect_data = parse_prospect_text(prospect)
+        else:
+            prospect_data = prospect
+        # Vérification des champs obligatoires
+        if not prospect_data.get("FirstName") or not prospect_data.get("LastName") or not prospect_data.get("Company"):
+            return JSONResponse(content={"error": "Champs obligatoires manquants pour le prospect (Prénom, Nom, Société)."}, status_code=400)
+        from FONCTION import add_prospect
+        result = add_prospect(prospect_data, access_token, salesforce_base_url)
+        if "error" in result:
+            return JSONResponse(content={"error": result["error"]}, status_code=400)
+        return {"message": "Prospect envoyé à Salesforce.", "result": result}
+    except Exception as e:
+        return JSONResponse(content={"error": f"Erreur lors de l'envoi du prospect : {str(e)}"}, status_code=500)
+
 # Endpoint pour envoyer les opportunités à Salesforce
 @app.get("/send-opportunities/")
 async def send_opportunities():
@@ -339,37 +384,31 @@ async def send_opportunities():
     try:
         if not pipeline.opportunities_set:
             return {"message": "Aucune opportunité à envoyer."}
-
         opportunities = []
         access_token = os.getenv("accessToken")
         salesforce_base_url = os.getenv("SALESFORCE_BASE_URL")
-
         if not access_token or not salesforce_base_url:
             return JSONResponse(content={"error": "Les informations d'authentification Salesforce sont manquantes."}, status_code=400)
-
-        for opportunity_text in pipeline.opportunities_set:
-            opportunity_data = parse_opportunity_text(opportunity_text)
-            print(f"Données formatées pour Salesforce : {opportunity_data}")
-            # Vérification explicite du compte
-            if not opportunity_data.get("AccountId"):
-                return JSONResponse(content={"error": "Compte introuvable ou informations manquantes pour le compte. Veuillez créer le compte ou compléter les informations."}, status_code=400)
-            # Vérification explicite du contact (si champ contact attendu)
-            contact_fields = ["Contact_pour_la_livraison__c", "Contact_pour_l_ex_cution_du_projet__c"]
-            for field in contact_fields:
-                if field in opportunity_data and not opportunity_data[field]:
-                    return JSONResponse(content={"error": "Contact introuvable ou informations manquantes pour le contact. Veuillez créer le contact ou compléter les informations."}, status_code=400)
-            result = add_opportunity(opportunity_data, access_token, salesforce_base_url)
+        for opp_text in pipeline.opportunities_set:
+            opp_data = parse_opportunity_text(opp_text)
+            print(f"Données formatées pour Salesforce : {opp_data}")
+            # Vérification explicite des champs obligatoires (exemple : nom, étape, compte)
+            if not opp_data.get("Name") or not opp_data.get("StageName") or not opp_data.get("AccountId"):
+                return JSONResponse(content={"error": "Informations manquantes pour créer l'opportunité. Veuillez compléter les champs obligatoires (Nom, Étape, Compte)."}, status_code=400)
+            result = add_opportunity(opp_data, access_token, salesforce_base_url)
             if "error" in result:
-                print(result["error"])
+                err = result["error"].lower()
+                if ("accountid" in err or "no such account" in err or "compte" in err):
+                    return JSONResponse(content={"error": "Le compte n'existe pas dans Salesforce. Veuillez d'abord créer le compte."}, status_code=400)
+                if ("contactid" in err or "no such contact" in err or "contact" in err):
+                    return JSONResponse(content={"error": "Le contact n'existe pas dans Salesforce. Veuillez d'abord créer le contact."}, status_code=400)
                 return JSONResponse(content={"error": result["error"]}, status_code=400)
             else:
                 opportunities.append(result)
-
         if opportunities:
             return {"message": "Opportunités envoyées à Salesforce.", "opportunities": opportunities}
         else:
             return {"message": "Aucune opportunité n'a pu être envoyée."}
-
     except Exception as e:
         return JSONResponse(content={"error": f"Erreur lors de l'envoi : {str(e)}"}, status_code=500)
 
@@ -380,14 +419,3 @@ app.mount("/static", StaticFiles(directory="html-css"), name="static")
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
-
-@app.post("/purge-old-opportunities/")
-async def purge_old_opportunities():
-    """
-    Supprime toutes les opportunités de plus de 36h de la mémoire côté serveur.
-    """
-    try:
-        nb_supprimees = purger_opportunites_anciennes()
-        return {"message": f"{nb_supprimees} opportunité(s) ancienne(s) supprimée(s) de la mémoire."}
-    except Exception as e:
-        return JSONResponse(content={"error": f"Erreur lors du nettoyage : {str(e)}"}, status_code=500)

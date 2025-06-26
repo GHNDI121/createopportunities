@@ -32,26 +32,56 @@
     <button class="send-btn" id="send-opportunity">Envoyer à Salesforce</button>
   </div>
   <div class="main-container">
-    <div class="section-title">Offres Marché Public Scrapées</div>
-    <!-- Bouton pour activer le scraping -->
-    <button class="chat-send-btn" id="scrape-btn">scrapées les offres</button>
-    <!-- Bouton pour créer toutes les opportunités scrapées -->
-    <button class="chat-send-btn mt-1" id="create-all-btn">Créer toutes les opportunités</button>
-    <div class="table-container">
-      <table id="offers-table">
-        <thead>
-          <tr>
-            <th>Référence</th>
-            <th>Objet</th>
-            <th>Autorité</th>
-            <th>Publié le</th>
-            <th>Date limite</th>
-            <th>Détail</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="tabs-container">
+      <button class="tab-btn active" id="tab-offres">Offres Marché Public Scrapées</button>
+      <button class="tab-btn" id="tab-prospects">Prospects détectés</button>
+    </div>
+    <div id="tab-content-offres">
+      <div class="section-title">Offres Marché Public Scrapées</div>
+      <!-- Boutons existants... -->
+      <button class="chat-send-btn" id="scrape-btn">scrapées les offres</button>
+      <button class="chat-send-btn mt-1" id="create-all-btn">Créer tous les prospects</button>
+      <div class="table-container">
+        <table id="offers-table">
+          <thead>
+            <tr>
+              <th>Référence</th>
+              <th>Objet</th>
+              <th>Autorité</th>
+              <th>Publié le</th>
+              <th>Date limite</th>
+              <th>Détail</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="tab-content-prospects" style="display:none;">
+      <div class="section-title">Prospects détectés (issus du scraping)</div>
+      <div class="table-container">
+        <table id="prospects-table" class="prospects-table">
+          <thead>
+            <tr>
+              <th>Société</th>
+              <th>Adresse email</th>
+              <th>Secteur d’activité</th>
+              <th>Statut</th>
+              <th>Envoyer</th>
+              <th>Supprimer</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <!-- Modale pour affichage du détail complet d'un prospect -->
+  <div id="modal-prospect-bg" class="modal-bg" style="display:none;">
+    <div class="modal-content">
+      <button class="modal-close" id="modal-prospect-close">&times;</button>
+      <div id="modal-prospect-details"></div>
     </div>
   </div>
   <!-- Modale pour affichage du détail complet -->
@@ -89,7 +119,7 @@
           <td>${offre['Publié le'] || '-'}</td>
           <td>${offre['Date limite'] || '-'}</td>
           <td><span class='details-extrait' style='cursor:pointer;color:var(--blue);text-decoration:underline;' onclick='showDetails(${idx})'>${extrait}</span></td>
-          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer l'opportunité</button></td>
+          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer le prospect</button></td>
         `;
         tbody.appendChild(tr);
       });
@@ -128,7 +158,7 @@
           <td>${offre['Publié le'] || '-'}</td>
           <td>${offre['Date limite'] || '-'}</td>
           <td><span class='details-extrait' style='cursor:pointer;color:var(--blue);text-decoration:underline;' onclick='showDetails(${idx})'>${extrait}</span></td>
-          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer l'opportunité</button></td>
+          <td><button class='chat-send-btn' onclick='createOne(${idx})'>Créer le prospect</button></td>
         `;
         tbody.appendChild(tr);
       });
@@ -143,35 +173,90 @@
     document.getElementById('modal-close').onclick = function() {
       document.getElementById('modal-bg').style.display = 'none';
     };
-    // Créer une opportunité à partir d'une offre scrapée (index)
+    // Toasts pour messages d'erreur/succès (similaire à accueil.html)
+    function showToast(msg, type = 'error') {
+      let toast = document.createElement('div');
+      toast.className = 'toast ' + (type === 'success' ? 'toast-success' : 'toast-error');
+      toast.innerText = msg;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 4000);
+    }
+    // Créer un prospect à partir d'une offre scrapée (index)
     window.createOne = async function(idx) {
       showLoader();
-      const res = await fetch('http://localhost:8000/process-opportunity/', {
-        method: 'POST',
-        body: new URLSearchParams({file_type: 'scraping', index: idx})
+      try {
+        // Appel API backend pour créer le prospect via process_opportunity
+        const formData = new URLSearchParams();
+        formData.append('file_type', 'scraping');
+        formData.append('index', idx);
+        const res = await fetch('http://localhost:8000/process-opportunity/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: formData
+        });
+        const data = await res.json();
+        hideLoader();
+        if (data.error) {
+          showToast(data.error, 'error');
+          return;
+        }
+        // On attend un ou plusieurs prospects dans data.opportunities
+        let newProspects = [];
+        if (Array.isArray(data.opportunities)) {
+          newProspects = data.opportunities
+            .map(o => (typeof o === 'string' ? parseProspectText(o) : o))
+            .filter(o => o && (o['Company'] || o['Société']));
+        } else if (data.opportunities) {
+          let o = typeof data.opportunities === 'string' ? parseProspectText(data.opportunities) : data.opportunities;
+          if (o && (o['Company'] || o['Société'])) newProspects.push(o);
+        }
+        if (newProspects.length > 0) {
+          // Ajout au localStorage avec date de création
+          let prospects = [];
+          if (localStorage.getItem('prospects')) {
+            try { prospects = JSON.parse(localStorage.getItem('prospects')); } catch(e) {}
+          }
+          // Ajouter la date de création sur chaque nouveau prospect
+          const now = Date.now();
+          newProspects.forEach(p => { p._createdAt = now; });
+          prospects = prospects.concat(newProspects);
+          localStorage.setItem('prospects', JSON.stringify(prospects));
+          // Rafraîchir la table prospects (avec filtrage 48h)
+          renderProspects(getValidProspectsFromStorage());
+          // Basculer sur l'onglet prospects
+          document.getElementById('tab-prospects').classList.add('active');
+          document.getElementById('tab-offres').classList.remove('active');
+          document.getElementById('tab-content-offres').style.display = 'none';
+          document.getElementById('tab-content-prospects').style.display = '';
+          showToast('Prospect créé avec succès !', 'success');
+        } else {
+          showToast('Aucun prospect détecté ou erreur de parsing.', 'error');
+        }
+      } catch (e) {
+        hideLoader();
+        showToast('Erreur lors de la création du prospect.', 'error');
+      }
+    }
+
+    // Correction du parsing pour séparer correctement prénom et nom même si les valeurs sont proches
+    function parseProspectText(txt) {
+      const obj = {};
+      // Découper le texte en lignes et parser chaque ligne
+      txt.split('\n').forEach(line => {
+        let m;
+        if (m = line.match(/^\s*-?\s*Statut de la piste\s*:\s*(.+)$/i)) obj['Statut de la piste'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Pr[ée]nom\s*:\s*(.+)$/i)) obj['Prénom'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Nom\s*:\s*(.+)$/i)) obj['Nom'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Soci[ée]t[ée]\s*:\s*(.+)$/i)) obj['Société'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*T[ée]l[ée]phone\s*:\s*(.+)$/i)) obj['Téléphone'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Fonction\s*:\s*(.+)$/i)) obj['Fonction'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Adresse email\s*:\s*(.+)$/i)) obj['Adresse email'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Fonction autre\s*:\s*(.+)$/i)) obj['Fonction autre'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Secteur d’activit[ée]\s*:\s*(.+)$/i)) obj['Secteur d’activité'] = m[1].trim();
+        else if (m = line.match(/^\s*-?\s*Description\s*:\s*(.+)$/i)) obj['Description'] = m[1].trim();
       });
-      const data = await res.json();
-      hideLoader();
-      let opportunities = [];
-      if (localStorage.getItem('opportunities')) {
-        opportunities = JSON.parse(localStorage.getItem('opportunities'));
-      }
-      // Correction : filtrer et n'ajouter que les objets opportunité valides
-      let newOpps = [];
-      if (Array.isArray(data.opportunities)) {
-        newOpps = data.opportunities
-          .map(o => (typeof o === 'string' ? parseOpportunityText(o) : o))
-          .filter(o => o && (o.Name || o['Nom de l\'opportunité']));
-      } else if (data.opportunities) {
-        let o = typeof data.opportunities === 'string' ? parseOpportunityText(data.opportunities) : data.opportunities;
-        if (o && (o.Name || o['Nom de l\'opportunité'])) newOpps.push(o);
-      }
-      // Ajout à la liste existante
-      opportunities = opportunities.concat(newOpps);
-      localStorage.setItem('opportunities', JSON.stringify(opportunities));
-      // Redirection automatique vers la page d'accueil pour voir la nouvelle opportunité
-      window.location.href = 'accueil.html';
-    };
+      return obj;
+    }
     // Créer toutes les opportunités scrapées
     document.getElementById('create-all-btn').onclick = async function() {
       showLoader();
@@ -199,9 +284,56 @@
       localStorage.setItem('opportunities', JSON.stringify(opportunities));
       alert(data.message || 'Toutes les opportunités ont été créées !');
     };
-    // Envoyer à Salesforce : appel l'API FastAPI pour envoyer les opportunités
+    // Envoyer à Salesforce : appel l'API FastAPI pour envoyer les opportunités ou prospects selon l'onglet actif
     document.getElementById('send-opportunity').onclick = async function() {
       showLoader();
+      // Détecter l'onglet actif
+      const isProspectsTab = document.getElementById('tab-prospects').classList.contains('active');
+      if (isProspectsTab) {
+        // --- ENVOI EN MASSE DES PROSPECTS NON ENVOYÉS ---
+        let prospects = JSON.parse(localStorage.getItem('prospects')) || [];
+        let sentStatus = {};
+        try { sentStatus = JSON.parse(localStorage.getItem('prospects_sent_status')) || {}; } catch(e) { sentStatus = {}; }
+        // Filtrer prospects non envoyés
+        const toSend = prospects.map((p, idx) => {
+          const key = p['Société'] || p['Company'] || idx;
+          return sentStatus[key] ? null : { prospect: p, idx, key };
+        }).filter(x => x);
+        if (toSend.length === 0) {
+          hideLoader();
+          showToast('Aucun prospect à envoyer.', 'success');
+          return;
+        }
+        let successCount = 0, failCount = 0;
+        for (const { prospect, idx, key } of toSend) {
+          try {
+            const res = await fetch('http://localhost:8000/send-prospect/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(prospect)
+            });
+            const data = await res.json();
+            if (data.error) {
+              failCount++;
+              showToast(`Erreur prospect ${prospect['Société'] || prospect['Company'] || idx}: ${data.error}`, 'error');
+            } else {
+              // Marquer comme envoyé
+              sentStatus[key] = true;
+              successCount++;
+            }
+          } catch (err) {
+            failCount++;
+            showToast(`Erreur réseau pour ${prospect['Société'] || prospect['Company'] || idx}`, 'error');
+          }
+        }
+        localStorage.setItem('prospects_sent_status', JSON.stringify(sentStatus));
+        renderProspects(prospects);
+        hideLoader();
+        if (successCount > 0) showToast(`${successCount} prospect(s) envoyé(s) avec succès !`, 'success');
+        if (failCount === 0 && successCount === 0) showToast('Aucun prospect à envoyer.', 'success');
+        return;
+      }
+      // --- ENVOI DES OPPORTUNITÉS (COMPORTEMENT EXISTANT) ---
       try {
         const res = await fetch('http://localhost:8000/send-opportunities/');
         const data = await res.json();
@@ -226,6 +358,172 @@
     if (performance.navigation.type === 1) {
       window.location.href = 'index.html';
     }
+    // --- Onglets Offres/Prospects ---
+    document.getElementById('tab-offres').onclick = function() {
+      this.classList.add('active');
+      document.getElementById('tab-prospects').classList.remove('active');
+      document.getElementById('tab-content-offres').style.display = '';
+      document.getElementById('tab-content-prospects').style.display = 'none';
+    };
+    document.getElementById('tab-prospects').onclick = function() {
+      this.classList.add('active');
+      document.getElementById('tab-offres').classList.remove('active');
+      document.getElementById('tab-content-offres').style.display = 'none';
+      document.getElementById('tab-content-prospects').style.display = '';
+      // Rafraîchir la table prospects à chaque clic sur l'onglet (pour gérer l'expiration 48h)
+      renderProspects(getValidProspectsFromStorage());
+    };
+    // --- Prospects Table Logic ---
+    // Table prospects façon opportunités (statut, actions, détail sur clic nom)
+    function renderProspects(prospects) {
+      const tbody = document.querySelector('#prospects-table tbody');
+      tbody.innerHTML = '';
+      let sentStatus = {};
+      try { sentStatus = JSON.parse(localStorage.getItem('prospects_sent_status')) || {}; } catch(e) { sentStatus = {}; }
+      (prospects || []).slice().sort((a, b) => (b._createdAt || 0) - (a._createdAt || 0)).forEach((prospect, idx) => {
+        const key = prospect['Société'] || prospect['Company'] || idx;
+        const isSent = sentStatus[key];
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="cursor:pointer;" title="Voir le détail complet">${prospect['Société'] || prospect['Company'] || '-'}</td>
+          <td>${prospect['Adresse email'] || prospect['Email'] || '-'}</td>
+          <td>${prospect['Secteur d’activité'] || prospect['Secteur'] || '-'}</td>
+          <td style="text-align:center;">
+            <span class="sent-status" title="Statut d'envoi">
+              <svg width="24" height="24" fill="none" stroke="${isSent ? 'green' : 'gray'}" stroke-width="3" viewBox="0 0 24 24">
+                <polyline points="20 6 10 18 4 12"></polyline>
+              </svg>
+            </span>
+          </td>
+          <td style="text-align:center;">
+            <button class="send-one-prospect-btn" title="Envoyer ce prospect" data-idx="${idx}" style="background:none;border:none;cursor:pointer;">
+              <svg width="24" height="24" fill="none" stroke="#007bff" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </td>
+          <td style="text-align:center;">
+            <button class="delete-prospect-btn" title="Supprimer ce prospect" data-idx="${idx}" style="background:none;border:none;cursor:pointer;">
+              <svg width="24" height="24" fill="none" stroke="red" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><line x="9" y="10" x2="9" y2="16"/><line x="15" y="10" x2="15" y2="16"/><line x="10" y="4" x2="14" y2="4"/></svg>
+            </button>
+          </td>
+        `;
+        // Affichage du détail sur clic sur le nom (main au survol)
+        tr.querySelector('td').onclick = function() {
+          showProspectDetails(idx);
+        };
+        tbody.appendChild(tr);
+      });
+      // Suppression d'un prospect
+      document.querySelectorAll('.delete-prospect-btn').forEach(btn => {
+        btn.onclick = async function(e) {
+          e.stopPropagation();
+          const idx = parseInt(this.getAttribute('data-idx'));
+          let prospects = JSON.parse(localStorage.getItem('prospects')) || [];
+          const prospect = prospects[idx];
+          // Appel API backend pour suppression
+          try {
+            const response = await fetch('http://localhost:8000/delete-opportunity/', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(prospect)
+            });
+            const data = await response.json();
+            if (response.ok) {
+              prospects.splice(idx, 1);
+              localStorage.setItem('prospects', JSON.stringify(prospects));
+              // Mettre à jour le statut d'envoi
+              let sentStatus = JSON.parse(localStorage.getItem('prospects_sent_status')) || {};
+              const key = prospect['Société'] || prospect['Company'] || idx;
+              delete sentStatus[key];
+              localStorage.setItem('prospects_sent_status', JSON.stringify(sentStatus));
+              renderProspects(prospects);
+              showToast('Prospect supprimé avec succès.', 'success');
+            } else {
+              showToast(data.error || 'Erreur lors de la suppression côté serveur.', 'error');
+            }
+          } catch (err) {
+            showToast('Erreur réseau lors de la suppression.', 'error');
+          }
+        };
+      });
+      // Envoi d'un prospect (API /send-prospect/)
+      document.querySelectorAll('.send-one-prospect-btn').forEach(btn => {
+        btn.onclick = async function(e) {
+          e.stopPropagation();
+          const idx = parseInt(this.getAttribute('data-idx'));
+          let prospects = JSON.parse(localStorage.getItem('prospects')) || [];
+          const prospect = prospects[idx];
+          showLoader();
+          try {
+            const res = await fetch('http://localhost:8000/send-prospect/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(prospect)
+            });
+            const data = await res.json();
+            hideLoader();
+            if (data.error) {
+              showToast(data.error, 'error');
+              return;
+            }
+            // Marquer comme envoyé
+            let sentStatus = JSON.parse(localStorage.getItem('prospects_sent_status')) || {};
+            const key = prospect['Société'] || prospect['Company'] || idx;
+            sentStatus[key] = true;
+            localStorage.setItem('prospects_sent_status', JSON.stringify(sentStatus));
+            renderProspects(prospects);
+            showToast('Prospect envoyé avec succès !', 'success');
+          } catch (err) {
+            hideLoader();
+            showToast('Erreur lors de l\'envoi du prospect.', 'error');
+          }
+        };
+      });
+    }
+    // --- Affichage initial des prospects détectés (issus du scraping) ---
+    function getValidProspectsFromStorage() {
+      let prospects = [];
+      try { prospects = JSON.parse(localStorage.getItem('prospects')) || []; } catch(e) { prospects = []; }
+      // Ne garder que ceux créés il y a moins de 48h (si date présente)
+      const now = Date.now();
+      return prospects.filter(p => {
+        if (!p._createdAt) return true; // rétrocompatibilité : afficher si pas de date
+        return (now - p._createdAt) < 48*3600*1000;
+      });
+    }
+    // Affichage automatique de la table prospects au chargement
+    (function() {
+      const validProspects = getValidProspectsFromStorage();
+      if (validProspects.length > 0) {
+        renderProspects(validProspects);
+      }
+    })();
+    // Fonction d'affichage du détail dans une modale (sur clic nom)
+    window.showProspectDetails = function(idx) {
+      const prospect = (JSON.parse(localStorage.getItem('prospects')) || [])[idx];
+      let details = "<h3>Détail du prospect</h3><table class='modal-table'>";
+      const champs = [
+        ['Statut de la piste', prospect['Statut de la piste'] || '-'],
+        ['Prénom', prospect['Prénom'] || prospect['FirstName'] || '-'],
+        ['Nom', prospect['Nom'] || prospect['LastName'] || '-'],
+        ['Société', prospect['Société'] || prospect['Company'] || '-'],
+        ['Téléphone', prospect['Téléphone'] || prospect['Phone'] || '-'],
+        ['Fonction', prospect['Fonction'] || '-'],
+        ['Adresse email', prospect['Adresse email'] || prospect['Email'] || '-'],
+        ['Fonction autre', prospect['Fonction autre'] || '-'],
+        ['Secteur d’activité', prospect['Secteur d’activité'] || prospect['Secteur'] || '-'],
+        ['Description', prospect['Description'] || '-']
+      ];
+      champs.forEach(([label, value]) => {
+        details += `<tr><td style='font-weight:bold;'>${label}</td><td>${value}</td></tr>`;
+      });
+      details += "</table>";
+      document.getElementById('modal-prospect-details').innerHTML = details;
+      document.getElementById('modal-prospect-bg').style.display = 'flex';
+    };
+    // Fermeture de la modale prospect
+    document.getElementById('modal-prospect-close').onclick = function() {
+      document.getElementById('modal-prospect-bg').style.display = 'none';
+    };
   </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-from FONCTION import detect_opportunities, transcribe_audio_file, convert_audio_to_wav, create_contact, create_compte
+from FONCTION import create_prospect, detect_opportunities, parse_prospect_text, add_prospect, transcribe_audio_file, convert_audio_to_wav, create_contact, create_compte
 from PIL import Image
 import pytesseract
 import re
@@ -41,11 +41,10 @@ class OpportunityPipeline:
             return None
 
     def process_text(self, texte):
-        # Extraire les opportunités du texte sans vérifier si le texte a déjà été utilisé
-        raw_opportunities = detect_opportunities(texte)
+        # Utiliser detect_opportunities pour toutes les entrées sauf offres scrapées
+        raw_opps = detect_opportunities(texte)
         # Séparer chaque opportunité par des lignes vides
-        blocs = re.split(r"\n\s*\n", raw_opportunities.strip())
-
+        blocs = re.split(r"\n\s*\n", raw_opps.strip())
         for bloc in blocs:
             normalized = bloc.strip()
             if normalized and normalized not in self.opportunities_set:
@@ -60,7 +59,7 @@ class OpportunityPipeline:
                 print("Opportunité déjà détectée, ignorée.")
         # Ajouter le texte à la mémoire après traitement
         ajouter_texte(texte)
-        return raw_opportunities
+        return raw_opps
 
 
     def handle_scraped_offers(self, notebook_path, index=None):
@@ -78,18 +77,43 @@ class OpportunityPipeline:
             try:
                 offre = offres[index]
                 texte = dict_to_text(offre)
-                self.process_text(texte)
+                # Utiliser create_prospect pour les offres scrapées
+                raw_prospects = create_prospect(texte)
+                blocs = re.split(r"\n\s*\n", raw_prospects.strip())
+                for bloc in blocs:
+                    normalized = bloc.strip()
+                    if normalized and normalized not in self.opportunities_set:
+                        if opportunite_existe({"texte": normalized}):
+                            print("Prospect déjà présent dans la mémoire, ignoré.")
+                            continue
+                        print("Nouveau prospect :\n", normalized)
+                        self.opportunities_set.add(normalized)
+                        ajouter_opportunite({"texte": normalized})
+                    elif normalized:
+                        print("Prospect déjà détecté, ignoré.")
                 if not texte_existe(texte):
-                    ajouter_texte(texte)  # Ajout du texte à la mémoire seulement s'il n'existe pas déjà
+                    ajouter_texte(texte)
             except IndexError:
                 print(f"Index {index} hors limites pour les offres scrapées.")
         else:
             # Créer des opportunités pour toutes les offres
             for offre in offres:
                 texte = dict_to_text(offre)
-                self.process_text(texte)
+                raw_prospects = create_prospect(texte)
+                blocs = re.split(r"\n\s*\n", raw_prospects.strip())
+                for bloc in blocs:
+                    normalized = bloc.strip()
+                    if normalized and normalized not in self.opportunities_set:
+                        if opportunite_existe({"texte": normalized}):
+                            print("Prospect déjà présent dans la mémoire, ignoré.")
+                            continue
+                        print("Nouveau prospect scrapé :\n", normalized)
+                        self.opportunities_set.add(normalized)
+                        ajouter_opportunite({"texte": normalized})
+                    elif normalized:
+                        print("Prospect déjà détecté, ignoré.")
                 if not texte_existe(texte):
-                    ajouter_texte(texte)  # Ajout du texte à la mémoire seulement s'il n'existe pas déjà
+                    ajouter_texte(texte)
 
     def handle_scraped_offers_from_list(self, offres_data, index=None):
         """
@@ -105,7 +129,19 @@ class OpportunityPipeline:
             try:
                 offre = offres_data[index]
                 texte = dict_to_text(offre)
-                self.process_text(texte)
+                raw_prospects = create_prospect(texte)
+                blocs = re.split(r"\n\s*\n", raw_prospects.strip())
+                for bloc in blocs:
+                    normalized = bloc.strip()
+                    if normalized and normalized not in self.opportunities_set:
+                        if opportunite_existe({"texte": normalized}):
+                            print("Prospect déjà présent dans la mémoire, ignoré.")
+                            continue
+                        print("Nouveau prospect scrapé :\n", normalized)
+                        self.opportunities_set.add(normalized)
+                        ajouter_opportunite({"texte": normalized})
+                    elif normalized:
+                        print("Prospect déjà détecté, ignoré.")
                 if not texte_existe(texte):
                     ajouter_texte(texte)
             except IndexError:
@@ -114,7 +150,19 @@ class OpportunityPipeline:
             # Créer des opportunités pour toutes les offres
             for offre in offres_data:
                 texte = dict_to_text(offre)
-                self.process_text(texte)
+                raw_prospects = create_prospect(texte)
+                blocs = re.split(r"\n\s*\n", raw_prospects.strip())
+                for bloc in blocs:
+                    normalized = bloc.strip()
+                    if normalized and normalized not in self.opportunities_set:
+                        if opportunite_existe({"texte": normalized}):
+                            print("Prospect déjà présent dans la mémoire, ignoré.")
+                            continue
+                        print("Nouveau prospect scrapé :\n", normalized)
+                        self.opportunities_set.add(normalized)
+                        ajouter_opportunite({"texte": normalized})
+                    elif normalized:
+                        print("Prospect déjà détecté, ignoré.")
                 if not texte_existe(texte):
                     ajouter_texte(texte)
 
